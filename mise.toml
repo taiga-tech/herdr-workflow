@@ -1,0 +1,6 @@
+[tools]
+rust = "1.93.1"
+'npm:prettier' = 'latest'
+
+[tasks.format]
+run = 'prettier --write **/*.{md,json,yaml}'

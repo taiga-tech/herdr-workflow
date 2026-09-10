@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "recorded": "2026-09-11",
+  "files": [
+    {
+      "originalName": "herdr-workflow-design.md",
+      "path": "archive/design-0.1.md",
+      "sha256": "3831f68fc64259436f5fb5e147a18217f36423a53530c4f51b7a344d90825dc9"
+    },
+    {
+      "originalName": "herdr-workflow.example.yaml",
+      "path": "archive/workflow-0.1.yaml",
+      "sha256": "ac344a996d2308b6cde49285cd9390ae5a0abd884072a09717554b27cf516515"
+    }
+  ]
+}
