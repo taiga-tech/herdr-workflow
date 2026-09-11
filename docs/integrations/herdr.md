@@ -1,16 +1,16 @@
 ---
 id: INT-HERDR
-title: "Herdr連携と表示"
+title: 'Herdr連携と表示'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # Herdr連携と表示
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：API境界、接続先、表示方式、互換性試験。
 

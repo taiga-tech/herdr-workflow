@@ -1,16 +1,16 @@
 ---
 id: SPEC-CLEANUP
-title: "停止と後片付け"
+title: '停止と後片付け'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 停止と後片付け
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：通常停止、worktree削除、外部削除、復旧範囲。
 

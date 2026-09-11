@@ -1,28 +1,27 @@
 ---
 id: DOC-INDEX
-title: "文書目次"
+title: '文書目次'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-12'
 ---
 
 # 文書目次
 
-[配布物の入口](../README.md) · [更新ルール](maintenance.md)
+[リポジトリの入口](../README.md) · [更新ルール](maintenance.md)
 
 ## 参照の入口
 
-| 調べたいこと               | 文書                                                                               |
-| -------------------------- | ---------------------------------------------------------------------------------- |
-| 何を作るか、どこまで作るか | [概要](overview.md)・[機能一覧](features.md)                                       |
-| どう構成するか             | [アーキテクチャ](architecture.md)・[ディレクトリ構成](repository-structure.md)     |
-| どの規則で動くか           | 下記の仕様とリファレンス                                                           |
-| なぜその設計なのか         | [ADR](decisions/README.md)                                                         |
-| 実装順と未決事項           | [実装段階](planning/roadmap.md)・[未決事項](planning/open-questions.md)            |
-| どう検証するか             | [受け入れ試験](testing/acceptance.md)・[今回の文書検査](meta/validation-report.md) |
-| 元の章を探したい           | [移行表](meta/source-map.md)                                                       |
+| 調べたいこと               | 文書                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| 何を作るか、どこまで作るか | [概要](overview.md)・[機能一覧](features.md)                                   |
+| どう構成するか             | [アーキテクチャ](architecture.md)・[ディレクトリ構成](repository-structure.md) |
+| どの規則で動くか           | 下記の仕様とリファレンス                                                       |
+| なぜその設計なのか         | [ADR](decisions/README.md)                                                     |
+| 実装順と未決事項           | [実装段階](planning/roadmap.md)・[未決事項](planning/open-questions.md)        |
+| どう検証するか             | [受け入れ試験](testing/acceptance.md)・[開発ガイド](guides/development.md)     |
 
-各文書の`status`と検証範囲を確認する。仕様と操作例は実装前の案であり、実装済み機能として読むものではない。文書の編集版は0.2、設定例のスキーマ案は`version: 1`で、両者は別の番号である。
+各文書の`status`と検証範囲を確認する。`draft`の仕様は、コードと試験結果で確認できる範囲だけを実装済みとして扱う。文書版と設定スキーマ版は別の番号である。
 
 ## 正式な参照先の一覧
 
@@ -75,20 +74,28 @@ updated: "2026-09-11"
 
 ### 判断・文書運用
 
-| 文書ID            | 文書                                        | 状態       |
-| ----------------- | ------------------------------------------- | ---------- |
-| `ADR-INDEX`       | [設計判断の記録](decisions/README.md)       | `current`  |
-| `DOC-MAINTENANCE` | [文書の更新と参照のルール](maintenance.md)  | `current`  |
-| `DOC-AGENTS`      | [AI作業者向け参照案内](../AGENTS.md)        | `current`  |
-| `DOC-CHANGELOG`   | [文書変更履歴](../CHANGELOG.md)             | `current`  |
-| `META-SOURCE-MAP` | [元設計書からの移行表](meta/source-map.md)  | `current`  |
-| `META-VALIDATION` | [文書検査の記録](meta/validation-report.md) | `current`  |
-| `ARCHIVE-INDEX`   | [元資料の保存](../archive/README.md)        | `archived` |
+| 文書ID            | 文書                                       | 状態      |
+| ----------------- | ------------------------------------------ | --------- |
+| `ADR-INDEX`       | [設計判断の記録](decisions/README.md)      | `current` |
+| `DOC-MAINTENANCE` | [文書の更新と参照のルール](maintenance.md) | `current` |
+| `DOC-AGENTS`      | [AI作業者向け開発案内](../AGENTS.md)       | `current` |
+
+### 履歴・監査
+
+以下は現行仕様ではなく、文書移行時の追跡と監査に限って参照する。
+
+| 文書ID                | 文書                                                  | 状態       |
+| --------------------- | ----------------------------------------------------- | ---------- |
+| `DOC-CHANGELOG`       | [変更履歴](../CHANGELOG.md)                           | `current`  |
+| `META-SOURCE-MAP`     | [元設計書からの移行表](meta/source-map.md)            | `archived` |
+| `META-VALIDATION`     | [文書検査の記録](meta/validation-report.md)           | `archived` |
+| `ARCHIVE-INDEX`       | [元資料の保存](../archive/README.md)                  | `archived` |
+| `DOC-LEGACY-REDIRECT` | [旧設計書からの参照案内](../herdr-workflow-design.md) | `redirect` |
 
 ## 設定例と機械可読の一覧
 
-[設定例](../examples/workflow.yaml) / [文書manifest](manifest.json) / [元資料の保存記録](../archive/source-manifest.json) / [移行情報](meta/migration.json)
+[設定例](../examples/workflow.yaml) / [文書manifest](manifest.json)
 
 ## 更新時の確認
 
-機能を変更するときは、機能一覧から対象仕様とT番号を確認する。判断を変えるときは新しいADRを作り、仕様・例・試験へ反映する。文書だけの整合検査は配布物のルートで`python3 scripts/check_docs.py`を実行する。
+機能を変更するときは、機能一覧から対象仕様とT番号を確認する。判断を変えるときは新しいADRを作り、仕様・例・試験へ反映する。文書の整合検査はリポジトリルートで`mise run docs:check`を実行する。

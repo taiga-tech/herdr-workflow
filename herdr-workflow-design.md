@@ -1,9 +1,9 @@
 ---
 id: DOC-LEGACY-REDIRECT
-title: "旧設計書からの参照案内"
+title: '旧設計書からの参照案内'
 status: redirect
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 旧設計書からの参照案内

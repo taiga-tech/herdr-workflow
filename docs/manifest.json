@@ -1,287 +1,287 @@
 {
-  "schemaVersion": 1,
-  "documentVersion": "0.2",
-  "updated": "2026-09-11",
-  "documents": [
-    {
-      "id": "DOC-AGENTS",
-      "path": "AGENTS.md",
-      "title": "AI作業者向け参照案内",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "DOC-CHANGELOG",
-      "path": "CHANGELOG.md",
-      "title": "文書変更履歴",
-      "status": "current",
-      "sourceSections": [26]
-    },
-    {
-      "id": "DOC-ROOT",
-      "path": "README.md",
-      "title": "Herdr Workflow 設計資料",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "ARCHIVE-INDEX",
-      "path": "archive/README.md",
-      "title": "元資料の保存",
-      "status": "archived",
-      "sourceSections": []
-    },
-    {
-      "id": "DOC-INDEX",
-      "path": "docs/README.md",
-      "title": "文書目次",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "DOC-ARCHITECTURE",
-      "path": "docs/architecture.md",
-      "title": "アーキテクチャ",
-      "status": "draft",
-      "sourceSections": [5, "appendix"]
-    },
-    {
-      "id": "ADR-0001",
-      "path": "docs/decisions/0001-rust.md",
-      "title": "ADR-0001：Rustの採用",
-      "status": "accepted",
-      "sourceSections": []
-    },
-    {
-      "id": "ADR-0002",
-      "path": "docs/decisions/0002-coordinator-runner.md",
-      "title": "ADR-0002：CoordinatorとTaskRunnerの分離",
-      "status": "proposed",
-      "sourceSections": []
-    },
-    {
-      "id": "ADR-0003",
-      "path": "docs/decisions/0003-dependency-readiness.md",
-      "title": "ADR-0003：依存条件とreadinessの分離",
-      "status": "proposed",
-      "sourceSections": []
-    },
-    {
-      "id": "ADR-0004",
-      "path": "docs/decisions/0004-owned-resource-reconciliation.md",
-      "title": "ADR-0004：所有権と照合による復旧",
-      "status": "proposed",
-      "sourceSections": []
-    },
-    {
-      "id": "ADR-0005",
-      "path": "docs/decisions/0005-configuration-source.md",
-      "title": "ADR-0005：設定定義と生成スキーマの管理",
-      "status": "proposed",
-      "sourceSections": []
-    },
-    {
-      "id": "ADR-INDEX",
-      "path": "docs/decisions/README.md",
-      "title": "設計判断の記録",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "DOC-FEATURES",
-      "path": "docs/features.md",
-      "title": "機能一覧",
-      "status": "draft",
-      "sourceSections": [3]
-    },
-    {
-      "id": "DOC-GLOSSARY",
-      "path": "docs/glossary.md",
-      "title": "用語と所有権",
-      "status": "draft",
-      "sourceSections": [4]
-    },
-    {
-      "id": "GUIDE-DEVELOPMENT",
-      "path": "docs/guides/development.md",
-      "title": "開発環境と配布",
-      "status": "draft",
-      "sourceSections": [18, 22]
-    },
-    {
-      "id": "GUIDE-OPERATIONS",
-      "path": "docs/guides/operations.md",
-      "title": "運用と障害対応の手順案",
-      "status": "draft",
-      "sourceSections": []
-    },
-    {
-      "id": "INT-EXTERNAL",
-      "path": "docs/integrations/external-tools.md",
-      "title": "既存プラグインと外部ツール",
-      "status": "draft",
-      "sourceSections": [21]
-    },
-    {
-      "id": "INT-HERDR",
-      "path": "docs/integrations/herdr.md",
-      "title": "Herdr連携と表示",
-      "status": "draft",
-      "sourceSections": [14]
-    },
-    {
-      "id": "DOC-MAINTENANCE",
-      "path": "docs/maintenance.md",
-      "title": "文書の更新と参照のルール",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "META-SOURCE-MAP",
-      "path": "docs/meta/source-map.md",
-      "title": "元設計書からの移行表",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "META-VALIDATION",
-      "path": "docs/meta/validation-report.md",
-      "title": "文書検査の記録",
-      "status": "current",
-      "sourceSections": []
-    },
-    {
-      "id": "DOC-OVERVIEW",
-      "path": "docs/overview.md",
-      "title": "概要と対象範囲",
-      "status": "draft",
-      "sourceSections": [1]
-    },
-    {
-      "id": "PLAN-QUESTIONS",
-      "path": "docs/planning/open-questions.md",
-      "title": "未決事項",
-      "status": "draft",
-      "sourceSections": [25]
-    },
-    {
-      "id": "PLAN-ROADMAP",
-      "path": "docs/planning/roadmap.md",
-      "title": "実装段階",
-      "status": "draft",
-      "sourceSections": [23]
-    },
-    {
-      "id": "REF-CLI",
-      "path": "docs/reference/cli.md",
-      "title": "CLIとHerdr action",
-      "status": "draft",
-      "sourceSections": [20]
-    },
-    {
-      "id": "REF-CONFIGURATION",
-      "path": "docs/reference/configuration.md",
-      "title": "設定リファレンス",
-      "status": "draft",
-      "sourceSections": [6]
-    },
-    {
-      "id": "REF-SOURCES",
-      "path": "docs/reference/sources.md",
-      "title": "外部仕様と参考資料",
-      "status": "reference",
-      "sourceSections": [2, 27]
-    },
-    {
-      "id": "DOC-STRUCTURE",
-      "path": "docs/repository-structure.md",
-      "title": "ディレクトリ構成",
-      "status": "draft",
-      "sourceSections": [19]
-    },
-    {
-      "id": "SPEC-CLEANUP",
-      "path": "docs/specs/cleanup.md",
-      "title": "停止と後片付け",
-      "status": "draft",
-      "sourceSections": [17]
-    },
-    {
-      "id": "SPEC-EXECUTION",
-      "path": "docs/specs/execution.md",
-      "title": "コマンドとAgentの実行",
-      "status": "draft",
-      "sourceSections": [10]
-    },
-    {
-      "id": "SPEC-LAYOUT",
-      "path": "docs/specs/layout.md",
-      "title": "gridとペイン配置",
-      "status": "draft",
-      "sourceSections": [8]
-    },
-    {
-      "id": "SPEC-OBSERVABILITY",
-      "path": "docs/specs/observability.md",
-      "title": "readinessとログ",
-      "status": "draft",
-      "sourceSections": [11]
-    },
-    {
-      "id": "SPEC-PERSISTENCE",
-      "path": "docs/specs/persistence.md",
-      "title": "状態ストア",
-      "status": "draft",
-      "sourceSections": [15]
-    },
-    {
-      "id": "SPEC-RECOVERY",
-      "path": "docs/specs/recovery.md",
-      "title": "イベントと復旧",
-      "status": "draft",
-      "sourceSections": [13]
-    },
-    {
-      "id": "SPEC-SECURITY",
-      "path": "docs/specs/security.md",
-      "title": "実行承認と秘密情報",
-      "status": "draft",
-      "sourceSections": [16]
-    },
-    {
-      "id": "SPEC-STATE",
-      "path": "docs/specs/state-model.md",
-      "title": "状態モデル",
-      "status": "draft",
-      "sourceSections": [9]
-    },
-    {
-      "id": "SPEC-WORKFLOW",
-      "path": "docs/specs/workflow.md",
-      "title": "DAGとスケジューラ",
-      "status": "draft",
-      "sourceSections": [7]
-    },
-    {
-      "id": "SPEC-WORKTREE",
-      "path": "docs/specs/worktree.md",
-      "title": "worktreeとファイル操作",
-      "status": "draft",
-      "sourceSections": [12]
-    },
-    {
-      "id": "TEST-ACCEPTANCE",
-      "path": "docs/testing/acceptance.md",
-      "title": "テストと受け入れ条件",
-      "status": "draft",
-      "sourceSections": [24]
-    },
-    {
-      "id": "DOC-LEGACY-REDIRECT",
-      "path": "herdr-workflow-design.md",
-      "title": "旧設計書からの参照案内",
-      "status": "redirect",
-      "sourceSections": []
-    }
-  ]
+    "schemaVersion": 1,
+    "documentVersion": "0.2",
+    "updated": "2026-09-11",
+    "documents": [
+        {
+            "id": "DOC-AGENTS",
+            "path": "AGENTS.md",
+            "title": "AI作業者向け開発案内",
+            "status": "current",
+            "sourceSections": []
+        },
+        {
+            "id": "DOC-CHANGELOG",
+            "path": "CHANGELOG.md",
+            "title": "文書変更履歴",
+            "status": "current",
+            "sourceSections": [26]
+        },
+        {
+            "id": "DOC-ROOT",
+            "path": "README.md",
+            "title": "Herdr Workflow",
+            "status": "current",
+            "sourceSections": []
+        },
+        {
+            "id": "ARCHIVE-INDEX",
+            "path": "archive/README.md",
+            "title": "元資料の保存",
+            "status": "archived",
+            "sourceSections": []
+        },
+        {
+            "id": "DOC-INDEX",
+            "path": "docs/README.md",
+            "title": "文書目次",
+            "status": "current",
+            "sourceSections": []
+        },
+        {
+            "id": "DOC-ARCHITECTURE",
+            "path": "docs/architecture.md",
+            "title": "アーキテクチャ",
+            "status": "draft",
+            "sourceSections": [5, "appendix"]
+        },
+        {
+            "id": "ADR-0001",
+            "path": "docs/decisions/0001-rust.md",
+            "title": "ADR-0001：Rustの採用",
+            "status": "accepted",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-0002",
+            "path": "docs/decisions/0002-coordinator-runner.md",
+            "title": "ADR-0002：CoordinatorとTaskRunnerの分離",
+            "status": "proposed",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-0003",
+            "path": "docs/decisions/0003-dependency-readiness.md",
+            "title": "ADR-0003：依存条件とreadinessの分離",
+            "status": "proposed",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-0004",
+            "path": "docs/decisions/0004-owned-resource-reconciliation.md",
+            "title": "ADR-0004：所有権と照合による復旧",
+            "status": "proposed",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-0005",
+            "path": "docs/decisions/0005-configuration-source.md",
+            "title": "ADR-0005：設定定義と生成スキーマの管理",
+            "status": "proposed",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-INDEX",
+            "path": "docs/decisions/README.md",
+            "title": "設計判断の記録",
+            "status": "current",
+            "sourceSections": []
+        },
+        {
+            "id": "DOC-FEATURES",
+            "path": "docs/features.md",
+            "title": "機能一覧",
+            "status": "draft",
+            "sourceSections": [3]
+        },
+        {
+            "id": "DOC-GLOSSARY",
+            "path": "docs/glossary.md",
+            "title": "用語と所有権",
+            "status": "draft",
+            "sourceSections": [4]
+        },
+        {
+            "id": "GUIDE-DEVELOPMENT",
+            "path": "docs/guides/development.md",
+            "title": "開発環境と配布",
+            "status": "draft",
+            "sourceSections": [18, 22]
+        },
+        {
+            "id": "GUIDE-OPERATIONS",
+            "path": "docs/guides/operations.md",
+            "title": "運用と障害対応の手順案",
+            "status": "draft",
+            "sourceSections": []
+        },
+        {
+            "id": "INT-EXTERNAL",
+            "path": "docs/integrations/external-tools.md",
+            "title": "既存プラグインと外部ツール",
+            "status": "draft",
+            "sourceSections": [21]
+        },
+        {
+            "id": "INT-HERDR",
+            "path": "docs/integrations/herdr.md",
+            "title": "Herdr連携と表示",
+            "status": "draft",
+            "sourceSections": [14]
+        },
+        {
+            "id": "DOC-MAINTENANCE",
+            "path": "docs/maintenance.md",
+            "title": "文書の更新と参照のルール",
+            "status": "current",
+            "sourceSections": []
+        },
+        {
+            "id": "META-SOURCE-MAP",
+            "path": "docs/meta/source-map.md",
+            "title": "元設計書からの移行表",
+            "status": "archived",
+            "sourceSections": []
+        },
+        {
+            "id": "META-VALIDATION",
+            "path": "docs/meta/validation-report.md",
+            "title": "文書検査の記録",
+            "status": "archived",
+            "sourceSections": []
+        },
+        {
+            "id": "DOC-OVERVIEW",
+            "path": "docs/overview.md",
+            "title": "概要と対象範囲",
+            "status": "draft",
+            "sourceSections": [1]
+        },
+        {
+            "id": "PLAN-QUESTIONS",
+            "path": "docs/planning/open-questions.md",
+            "title": "未決事項",
+            "status": "draft",
+            "sourceSections": [25]
+        },
+        {
+            "id": "PLAN-ROADMAP",
+            "path": "docs/planning/roadmap.md",
+            "title": "実装段階",
+            "status": "draft",
+            "sourceSections": [23]
+        },
+        {
+            "id": "REF-CLI",
+            "path": "docs/reference/cli.md",
+            "title": "CLIとHerdr action",
+            "status": "draft",
+            "sourceSections": [20]
+        },
+        {
+            "id": "REF-CONFIGURATION",
+            "path": "docs/reference/configuration.md",
+            "title": "設定リファレンス",
+            "status": "draft",
+            "sourceSections": [6]
+        },
+        {
+            "id": "REF-SOURCES",
+            "path": "docs/reference/sources.md",
+            "title": "外部仕様と参考資料",
+            "status": "reference",
+            "sourceSections": [2, 27]
+        },
+        {
+            "id": "DOC-STRUCTURE",
+            "path": "docs/repository-structure.md",
+            "title": "ディレクトリ構成",
+            "status": "draft",
+            "sourceSections": [19]
+        },
+        {
+            "id": "SPEC-CLEANUP",
+            "path": "docs/specs/cleanup.md",
+            "title": "停止と後片付け",
+            "status": "draft",
+            "sourceSections": [17]
+        },
+        {
+            "id": "SPEC-EXECUTION",
+            "path": "docs/specs/execution.md",
+            "title": "コマンドとAgentの実行",
+            "status": "draft",
+            "sourceSections": [10]
+        },
+        {
+            "id": "SPEC-LAYOUT",
+            "path": "docs/specs/layout.md",
+            "title": "gridとペイン配置",
+            "status": "draft",
+            "sourceSections": [8]
+        },
+        {
+            "id": "SPEC-OBSERVABILITY",
+            "path": "docs/specs/observability.md",
+            "title": "readinessとログ",
+            "status": "draft",
+            "sourceSections": [11]
+        },
+        {
+            "id": "SPEC-PERSISTENCE",
+            "path": "docs/specs/persistence.md",
+            "title": "状態ストア",
+            "status": "draft",
+            "sourceSections": [15]
+        },
+        {
+            "id": "SPEC-RECOVERY",
+            "path": "docs/specs/recovery.md",
+            "title": "イベントと復旧",
+            "status": "draft",
+            "sourceSections": [13]
+        },
+        {
+            "id": "SPEC-SECURITY",
+            "path": "docs/specs/security.md",
+            "title": "実行承認と秘密情報",
+            "status": "draft",
+            "sourceSections": [16]
+        },
+        {
+            "id": "SPEC-STATE",
+            "path": "docs/specs/state-model.md",
+            "title": "状態モデル",
+            "status": "draft",
+            "sourceSections": [9]
+        },
+        {
+            "id": "SPEC-WORKFLOW",
+            "path": "docs/specs/workflow.md",
+            "title": "DAGとスケジューラ",
+            "status": "draft",
+            "sourceSections": [7]
+        },
+        {
+            "id": "SPEC-WORKTREE",
+            "path": "docs/specs/worktree.md",
+            "title": "worktreeとファイル操作",
+            "status": "draft",
+            "sourceSections": [12]
+        },
+        {
+            "id": "TEST-ACCEPTANCE",
+            "path": "docs/testing/acceptance.md",
+            "title": "テストと受け入れ条件",
+            "status": "draft",
+            "sourceSections": [24]
+        },
+        {
+            "id": "DOC-LEGACY-REDIRECT",
+            "path": "herdr-workflow-design.md",
+            "title": "旧設計書からの参照案内",
+            "status": "redirect",
+            "sourceSections": []
+        }
+    ]
 }

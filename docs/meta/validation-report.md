@@ -1,9 +1,9 @@
 ---
 id: META-VALIDATION
-title: "文書検査の記録"
-status: current
-documentVersion: "0.2"
-updated: "2026-09-11"
+title: '文書検査の記録'
+status: archived
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 文書検査の記録

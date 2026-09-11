@@ -1,45 +1,45 @@
 {
-  "ok": true,
-  "counts": {
-    "activeMarkdownDocuments": 40,
-    "relativeLinks": 476,
-    "explicitAnchors": 111,
-    "reachableDocuments": 40,
-    "sourceSnapshots": 2,
-    "mappedSourceSections": 28,
-    "sourceAcceptanceIdsRetained": 32,
-    "unchangedSourceAcceptanceCriteria": 32,
-    "featureIds": 18,
-    "decisionRecords": 5,
-    "openQuestionIds": 15
-  },
-  "errors": [],
-  "scope": "Documentation structure and preserved source material only. No product execution or external network checks.",
-  "supplementalChecks": {
-    "yamlSyntax": true,
-    "exampleUnchangedFromSource": true,
-    "tasks": 6,
-    "dagAcyclic": true,
-    "bootstrapJobsOnly": true,
-    "bootstrapTaskCount": 3,
-    "grid": [
-      {
-        "tab": "development",
-        "panes": 5,
-        "cells": 12,
-        "sliceable": true
-      }
-    ],
-    "agentPaneMapping": true,
-    "parsedMarkdownDocuments": 40,
-    "parsedTables": 37,
-    "checkerRegressionCases": [
-      "missing file",
-      "missing anchor",
-      "unclosed fence",
-      "modified source snapshot"
-    ],
-    "retainedProseParagraphsChecked": 157,
-    "noProductExecution": true
-  }
+    "ok": true,
+    "counts": {
+        "activeMarkdownDocuments": 40,
+        "relativeLinks": 476,
+        "explicitAnchors": 111,
+        "reachableDocuments": 40,
+        "sourceSnapshots": 2,
+        "mappedSourceSections": 28,
+        "sourceAcceptanceIdsRetained": 32,
+        "unchangedSourceAcceptanceCriteria": 32,
+        "featureIds": 18,
+        "decisionRecords": 5,
+        "openQuestionIds": 15
+    },
+    "errors": [],
+    "scope": "Documentation structure and preserved source material only. No product execution or external network checks.",
+    "supplementalChecks": {
+        "yamlSyntax": true,
+        "exampleUnchangedFromSource": true,
+        "tasks": 6,
+        "dagAcyclic": true,
+        "bootstrapJobsOnly": true,
+        "bootstrapTaskCount": 3,
+        "grid": [
+            {
+                "tab": "development",
+                "panes": 5,
+                "cells": 12,
+                "sliceable": true
+            }
+        ],
+        "agentPaneMapping": true,
+        "parsedMarkdownDocuments": 40,
+        "parsedTables": 37,
+        "checkerRegressionCases": [
+            "missing file",
+            "missing anchor",
+            "unclosed fence",
+            "modified source snapshot"
+        ],
+        "retainedProseParagraphsChecked": 157,
+        "noProductExecution": true
+    }
 }

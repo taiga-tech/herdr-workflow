@@ -1,9 +1,9 @@
 ---
 id: ARCHIVE-INDEX
-title: "元資料の保存"
+title: '元資料の保存'
 status: archived
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 元資料の保存

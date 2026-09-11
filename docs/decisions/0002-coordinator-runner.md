@@ -1,9 +1,9 @@
 ---
 id: ADR-0002
-title: "ADR-0002：CoordinatorとTaskRunnerの分離"
+title: 'ADR-0002：CoordinatorとTaskRunnerの分離'
 status: proposed
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # ADR-0002：CoordinatorとTaskRunnerの分離
@@ -30,7 +30,7 @@ IPC、プロセス起動記録、結果ファイル、再接続が必要にな�
 
 ## 採用条件
 
-T14、T15、T16、T26、T29の契約試験と、未決事項Q12の整理を行う。現在は元設計から移管した提案であり、実機確認済みではない。
+T14、T15、T16、T26、T29の契約試験と、未決事項Q12の整理を行う。現在は`proposed`であり、採用と実機確認が必要である。
 
 ## 関連文書
 

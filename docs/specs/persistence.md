@@ -1,16 +1,16 @@
 ---
 id: SPEC-PERSISTENCE
-title: "状態ストア"
+title: '状態ストア'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 状態ストア
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：保存対象、書き込み経路、Runner結果の取り込み、スキーマ更新。
 

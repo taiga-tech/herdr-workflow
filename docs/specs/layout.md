@@ -1,16 +1,16 @@
 ---
 id: SPEC-LAYOUT
-title: "gridとペイン配置"
+title: 'gridとペイン配置'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # gridとペイン配置
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：座標、検証、分割木への変換、再適用。
 

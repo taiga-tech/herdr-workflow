@@ -1,22 +1,22 @@
 ---
 id: TEST-ACCEPTANCE
-title: "テストと受け入れ条件"
+title: 'テストと受け入れ条件'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # テストと受け入れ条件
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：試験ID、入力条件、期待結果、検証状況。
 
 ## 試験の状態
 
-T01〜T32は元文書から維持した受け入れ条件で、すべて未実装・未実行として扱う。今回実行する文書の整合検査は、これらの製品試験とは別である。検証結果は実装commit、Herdr版、OS、日付、実行記録とともに追記する。
+T01〜T32は製品の受け入れ条件である。対応する実装と実行結果が記録されるまでは未実装・未実行として扱う。文書の整合検査は、これらの製品試験とは別である。検証結果は実装commit、Herdr版、OS、日付とともに記録する。
 
 <a id="source-24"></a>
 
@@ -110,4 +110,4 @@ T01〜T32は元文書から維持した受け入れ条件で、すべて未実�
 
 ## 関連文書
 
-[機能一覧](../features.md) / [段階](../planning/roadmap.md) / [今回の文書検査](../meta/validation-report.md)
+[機能一覧](../features.md) / [段階](../planning/roadmap.md) / [開発ガイド](../guides/development.md)

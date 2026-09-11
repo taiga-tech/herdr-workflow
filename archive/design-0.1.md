@@ -142,163 +142,163 @@ version: 1
 name: web-development
 
 inputs:
-  branch:
-    type: string
-    required: true
-  port:
-    type: integer
-    default: 3000
+    branch:
+        type: string
+        required: true
+    port:
+        type: integer
+        default: 3000
 
 worktree:
-  mode: create
-  branch: "${inputs.branch}"
-  base: main
-  existingBranch: use
-  ifAlreadyCheckedOut: error
+    mode: create
+    branch: '${inputs.branch}'
+    base: main
+    existingBranch: use
+    ifAlreadyCheckedOut: error
 
 files:
-  source: primary
-  copy:
-    - from: .env.local
-      to: .env.local
-      optional: true
-      ifExists: error
-  symlinks: reject
-  requireIgnored: true
+    source: primary
+    copy:
+        - from: .env.local
+          to: .env.local
+          optional: true
+          ifExists: error
+    symlinks: reject
+    requireIgnored: true
 
 defaults:
-  cwd: "${worktree.path}"
-  env:
-    NODE_ENV: development
-  jobTimeoutSeconds: 900
+    cwd: '${worktree.path}'
+    env:
+        NODE_ENV: development
+    jobTimeoutSeconds: 900
 
 bootstrap:
-  targets: [generate]
+    targets: [generate]
 
 tasks:
-  toolchain:
-    type: command
-    lifecycle: job
-    runner: supervised
-    argv: [mise, install]
-    timeoutSeconds: 600
+    toolchain:
+        type: command
+        lifecycle: job
+        runner: supervised
+        argv: [mise, install]
+        timeoutSeconds: 600
 
-  dependencies:
-    type: command
-    lifecycle: job
-    runner: supervised
-    argv: [mise, exec, --, pnpm, install, --frozen-lockfile]
-    dependsOn:
-      - task: toolchain
-        condition: succeeded
+    dependencies:
+        type: command
+        lifecycle: job
+        runner: supervised
+        argv: [mise, exec, --, pnpm, install, --frozen-lockfile]
+        dependsOn:
+            - task: toolchain
+              condition: succeeded
 
-  generate:
-    type: command
-    lifecycle: job
-    runner: supervised
-    argv: [mise, exec, --, pnpm, exec, prisma, generate]
-    dependsOn:
-      - task: dependencies
-        condition: succeeded
+    generate:
+        type: command
+        lifecycle: job
+        runner: supervised
+        argv: [mise, exec, --, pnpm, exec, prisma, generate]
+        dependsOn:
+            - task: dependencies
+              condition: succeeded
 
-  server:
-    type: command
-    lifecycle: service
-    runner: supervised
-    argv:
-      - mise
-      - exec
-      - --
-      - pnpm
-      - exec
-      - next
-      - dev
-      - --hostname
-      - "127.0.0.1"
-      - --port
-      - "${inputs.port}"
-    env:
-      PORT: "${inputs.port}"
-    dependsOn:
-      - task: generate
-        condition: succeeded
-    waitFor:
-      type: http
-      url: "http://127.0.0.1:${inputs.port}/"
-      status: 200
-      timeoutSeconds: 120
-      intervalMilliseconds: 500
-      consecutiveSuccesses: 2
-    stop:
-      graceSeconds: 10
+    server:
+        type: command
+        lifecycle: service
+        runner: supervised
+        argv:
+            - mise
+            - exec
+            - --
+            - pnpm
+            - exec
+            - next
+            - dev
+            - --hostname
+            - '127.0.0.1'
+            - --port
+            - '${inputs.port}'
+        env:
+            PORT: '${inputs.port}'
+        dependsOn:
+            - task: generate
+              condition: succeeded
+        waitFor:
+            type: http
+            url: 'http://127.0.0.1:${inputs.port}/'
+            status: 200
+            timeoutSeconds: 120
+            intervalMilliseconds: 500
+            consecutiveSuccesses: 2
+        stop:
+            graceSeconds: 10
 
-  tests:
-    type: command
-    lifecycle: job
-    runner: supervised
-    argv: [mise, exec, --, pnpm, run, "test:e2e"]
-    env:
-      BASE_URL: "http://127.0.0.1:${inputs.port}"
-    dependsOn:
-      - task: server
-        condition: ready
-    onDependencyLost: stop
-    timeoutSeconds: 600
+    tests:
+        type: command
+        lifecycle: job
+        runner: supervised
+        argv: [mise, exec, --, pnpm, run, 'test:e2e']
+        env:
+            BASE_URL: 'http://127.0.0.1:${inputs.port}'
+        dependsOn:
+            - task: server
+              condition: ready
+        onDependencyLost: stop
+        timeoutSeconds: 600
 
-  developer:
-    type: agent
-    agent:
-      kind: claude
-      # 起動だけを行い、プロンプトは自動送信しない。
-    dependsOn:
-      - task: generate
-        condition: succeeded
+    developer:
+        type: agent
+        agent:
+            kind: claude
+            # 起動だけを行い、プロンプトは自動送信しない。
+        dependsOn:
+            - task: generate
+              condition: succeeded
 
 workspace:
-  label: "${inputs.branch}"
-  initialTab: preserve
-  tabs:
-    - id: development
-      label: development
-      layout:
-        type: grid
-        columns: 6
-        rows: 2
-      panes:
-        - id: A
-          label: server
-          view: { type: logs, task: server }
-          placement: { column: 1, row: 1, colSpan: 3, rowSpan: 1 }
-        - id: B
-          label: developer
-          view: { type: agent, task: developer }
-          placement: { column: 4, row: 1, colSpan: 3, rowSpan: 1 }
-        - id: C
-          label: tests
-          view: { type: logs, task: tests }
-          placement: { column: 1, row: 2, colSpan: 1, rowSpan: 1 }
-        - id: D
-          label: workflow
-          view: { type: status }
-          placement: { column: 2, row: 2, colSpan: 4, rowSpan: 1 }
-        - id: E
-          label: shell
-          view: { type: shell }
-          placement: { column: 6, row: 2, colSpan: 1, rowSpan: 1 }
+    label: '${inputs.branch}'
+    initialTab: preserve
+    tabs:
+        - id: development
+          label: development
+          layout:
+              type: grid
+              columns: 6
+              rows: 2
+          panes:
+              - id: A
+                label: server
+                view: { type: logs, task: server }
+                placement: { column: 1, row: 1, colSpan: 3, rowSpan: 1 }
+              - id: B
+                label: developer
+                view: { type: agent, task: developer }
+                placement: { column: 4, row: 1, colSpan: 3, rowSpan: 1 }
+              - id: C
+                label: tests
+                view: { type: logs, task: tests }
+                placement: { column: 1, row: 2, colSpan: 1, rowSpan: 1 }
+              - id: D
+                label: workflow
+                view: { type: status }
+                placement: { column: 2, row: 2, colSpan: 4, rowSpan: 1 }
+              - id: E
+                label: shell
+                view: { type: shell }
+                placement: { column: 6, row: 2, colSpan: 1, rowSpan: 1 }
 
 execution:
-  maxConcurrentJobs: 4
-  maxLiveServices: 8
-  maxLiveAgents: 4
-  onFailure: stop-dependents
-  retries: 0
+    maxConcurrentJobs: 4
+    maxLiveServices: 8
+    maxLiveAgents: 4
+    onFailure: stop-dependents
+    retries: 0
 
 cleanup:
-  onStop:
-    processes: stop-owned
-    panes: preserve
-    worktree: preserve
-    branch: preserve
+    onStop:
+        processes: stop-owned
+        panes: preserve
+        worktree: preserve
+        branch: preserve
 ```
 
 `mise exec -- ...`を経由し、対象worktreeのmise設定で後続コマンドを実行する。`mise install`後に、親プロセスのPATHが自動更新されたと仮定しない。[S8]

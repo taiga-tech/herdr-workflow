@@ -1,16 +1,16 @@
 ---
 id: GUIDE-OPERATIONS
-title: "運用と障害対応の手順案"
+title: '運用と障害対応の手順案'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 運用と障害対応の手順案
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：作成、確認、復旧、停止、削除前確認の順序。
 

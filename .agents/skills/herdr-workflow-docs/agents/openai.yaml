@@ -1,0 +1,3 @@
+interface:
+  display_name: 'Herdr Workflow Docs'
+  short_description: 'Keep Herdr Workflow docs aligned with code'

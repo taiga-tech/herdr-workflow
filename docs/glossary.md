@@ -1,16 +1,16 @@
 ---
 id: DOC-GLOSSARY
-title: "用語と所有権"
+title: '用語と所有権'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 用語と所有権
 
 [文書目次](README.md) · [更新ルール](maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：Repository、Run、Task、Attempt、所有権の定義。
 

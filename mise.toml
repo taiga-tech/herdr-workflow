@@ -1,6 +1,19 @@
 [tools]
 rust = "1.93.1"
+uv = "0.12.11"
 'npm:prettier' = 'latest'
 
 [tasks.format]
-run = 'prettier --write **/*.{md,json,yaml}'
+run = 'prettier --write "**/*.{md,json,yaml}"'
+
+[tasks."docs:test"]
+description = "Run documentation checker regression tests"
+run = "uv run --no-project python -B .agents/skills/herdr-workflow-docs/scripts/test_check_docs.py"
+
+[tasks."docs:check"]
+description = "Check current documentation"
+run = "uv run --no-project python -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py"
+
+[tasks."docs:audit"]
+description = "Check current documentation and migration records"
+run = "uv run --no-project python -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py --check-migration"
