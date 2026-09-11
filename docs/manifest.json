@@ -6,7 +6,7 @@
     {
       "id": "DOC-AGENTS",
       "path": "AGENTS.md",
-      "title": "AI作業者向け参照案内",
+      "title": "AI作業者向け開発案内",
       "status": "current",
       "sourceSections": []
     },
@@ -20,7 +20,7 @@
     {
       "id": "DOC-ROOT",
       "path": "README.md",
-      "title": "Herdr Workflow 設計資料",
+      "title": "Herdr Workflow",
       "status": "current",
       "sourceSections": []
     },
@@ -140,14 +140,14 @@
       "id": "META-SOURCE-MAP",
       "path": "docs/meta/source-map.md",
       "title": "元設計書からの移行表",
-      "status": "current",
+      "status": "archived",
       "sourceSections": []
     },
     {
       "id": "META-VALIDATION",
       "path": "docs/meta/validation-report.md",
       "title": "文書検査の記録",
-      "status": "current",
+      "status": "archived",
       "sourceSections": []
     },
     {

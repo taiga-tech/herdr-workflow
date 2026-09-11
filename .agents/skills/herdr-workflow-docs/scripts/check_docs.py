@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Check this documentation package using only the Python standard library.
+"""Check project documentation using only the Python standard library.
 
-Checks document metadata, relative links and explicit anchors, source snapshots,
-migration entries, and preserved acceptance criteria. It does not run Rust,
-contact Herdr, execute workflow commands, or validate the YAML schema.
+Checks current document metadata, relative links, explicit anchors, and acceptance
+test IDs. With ``--check-migration``, it also checks archived source snapshots and
+migration entries. It does not run Rust, contact Herdr, execute workflow commands,
+or validate the YAML schema.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 def read_json(path: Path) -> dict:
@@ -55,7 +56,7 @@ def explicit_anchors(text: str) -> list[str]:
 
 def within_root(path: Path) -> bool:
     try:
-        path.resolve().relative_to(ROOT)
+        path.resolve().relative_to(ROOT.resolve())
         return True
     except ValueError:
         return False
@@ -115,6 +116,8 @@ def check(check_migration: bool = False) -> dict:
         for key in ['title','documentVersion','updated']:
             if not re.search(rf'^{key}:\s*\S+',front,re.M):
                 errors.append(f'Missing metadata {key}: {rel}')
+        if record.get('status') == 'archived' and not check_migration:
+            continue
         body, closed = without_fences(strip_front_matter(text))
         if not closed:
             errors.append(f'Unclosed fenced code block: {rel}')
@@ -125,7 +128,14 @@ def check(check_migration: bool = False) -> dict:
             errors.append(f'Duplicate explicit anchor: {rel}')
         texts[rel], anchors[rel], edges[rel] = body, set(extracted), set()
 
-    actual_files = {p.relative_to(ROOT).as_posix() for p in ROOT.rglob('*.md')}
+    # Agent skills and task notes are development metadata, not product docs.
+    actual_files = {
+        p.relative_to(ROOT).as_posix()
+        for p in ROOT.rglob('*.md')
+        if p.relative_to(ROOT).parts[0] not in {'.agents', 'tasks'}
+    }
+    # CLAUDE.md is a tracked alias for AGENTS.md, not a separate document.
+    actual_files.discard('CLAUDE.md')
     # The immutable source document is intentionally not a current document.
     actual_files.discard('archive/design-0.1.md')
     if actual_files != set(by_path):
@@ -148,8 +158,8 @@ def check(check_migration: bool = False) -> dict:
             if not path.exists():
                 errors.append(f'Broken relative link: {rel} -> {target}')
                 continue
-            dest = path.relative_to(ROOT).as_posix()
-            if dest in by_path:
+            dest = path.relative_to(ROOT.resolve()).as_posix()
+            if dest in texts:
                 edges[rel].add(dest)
             if parsed.fragment and path.suffix == '.md':
                 fragment = unquote(parsed.fragment)
@@ -165,48 +175,20 @@ def check(check_migration: bool = False) -> dict:
             continue
         reachable.add(rel)
         todo.extend(edges.get(rel,set())-reachable)
-    orphans = set(by_path)-reachable
+    orphans = set(texts)-reachable
     if orphans:
         errors.append(f'Documents unreachable from README: {sorted(orphans)}')
-    counts['activeMarkdownDocuments'] = len(by_path)
+    counts['manifestMarkdownDocuments'] = len(by_path)
+    counts['checkedMarkdownDocuments'] = len(texts)
     counts['relativeLinks'] = links
     counts['explicitAnchors'] = sum(len(v) for k,v in anchors.items() if k in by_path)
-    counts['reachableDocuments'] = len(reachable & set(by_path))
+    counts['reachableDocuments'] = len(reachable & set(texts))
 
-    source_manifest = read_json(ROOT/'archive/source-manifest.json')
-    for item in source_manifest.get('files',[]):
-        p = ROOT/item['path']
-        if not within_root(p) or not p.is_file():
-            errors.append(f'Missing source snapshot: {item["path"]}')
-            continue
-        actual = hashlib.sha256(p.read_bytes()).hexdigest()
-        if actual != item['sha256']:
-            errors.append(f'Source snapshot modified: {item["path"]}')
-    counts['sourceSnapshots'] = len(source_manifest.get('files',[]))
-
-    migration = read_json(ROOT/'docs/meta/migration.json')
-    entries = migration.get('sections',{})
-    expected_sections = {str(i) for i in range(1,28)} | {'appendix'}
-    if set(entries) != expected_sections:
-        errors.append('Migration map must cover source sections 1..27 and appendix')
-    for key, item in entries.items():
-        dest, anchor = item.get('path'), item.get('anchor')
-        if dest not in by_path or anchor not in anchors.get(dest,set()):
-            errors.append(f'Invalid migration destination for source section {key}')
-    counts['mappedSourceSections'] = len(entries)
-
-    original = (ROOT/'archive/design-0.1.md').read_text(encoding='utf-8')
     current = (ROOT/'docs/testing/acceptance.md').read_text(encoding='utf-8')
-    old_rows, new_rows = acceptance_rows(original), acceptance_rows(current)
+    new_rows = acceptance_rows(current)
     expected_tests = {f'T{i:02d}' for i in range(1,33)}
-    if set(old_rows) != expected_tests:
-        errors.append('Unexpected source acceptance test IDs')
     if not expected_tests.issubset(new_rows):
-        errors.append('A source acceptance test ID is missing')
-    # Future criteria may evolve. Report drift against the snapshot for review.
-    for test in sorted(expected_tests & set(new_rows)):
-        if check_migration and new_rows[test] != old_rows[test]:
-            errors.append(f'Acceptance criterion differs from source: {test}; record an intentional migration change before updating the preservation check')
+        errors.append('An acceptance test ID is missing')
     for test in expected_tests:
         if test.lower() not in anchors.get('docs/testing/acceptance.md',set()):
             errors.append(f'Acceptance test has no stable anchor: {test}')
@@ -214,12 +196,46 @@ def check(check_migration: bool = False) -> dict:
     for test in expected_tests:
         if f'#{test.lower()}' not in features_text:
             errors.append(f'Acceptance test is not linked from a feature: {test}')
-    counts['sourceAcceptanceIdsRetained'] = len(expected_tests & set(new_rows))
-    counts['unchangedSourceAcceptanceCriteria'] = sum(new_rows.get(t) == old_rows[t] for t in expected_tests)
+    counts['acceptanceTestIds'] = len(expected_tests & set(new_rows))
     counts['featureIds'] = len([a for a in anchors.get('docs/features.md',set()) if re.fullmatch(r'f\d{2}',a)])
     counts['decisionRecords'] = len([r for r in records if re.fullmatch(r'ADR-\d{4}',r['id'])])
     counts['openQuestionIds'] = len([a for a in anchors.get('docs/planning/open-questions.md',set()) if re.fullmatch(r'q\d{2}',a)])
-    return {'ok':not errors,'counts':counts,'errors':errors,'scope':'Documentation structure and preserved source material only. No product execution or external network checks.'}
+    if check_migration:
+        source_manifest = read_json(ROOT/'archive/source-manifest.json')
+        for item in source_manifest.get('files',[]):
+            p = ROOT/item['path']
+            if not within_root(p) or not p.is_file():
+                errors.append(f'Missing source snapshot: {item["path"]}')
+                continue
+            actual = hashlib.sha256(p.read_bytes()).hexdigest()
+            if actual != item['sha256']:
+                errors.append(f'Source snapshot modified: {item["path"]}')
+        counts['sourceSnapshots'] = len(source_manifest.get('files',[]))
+
+        migration = read_json(ROOT/'docs/meta/migration.json')
+        entries = migration.get('sections',{})
+        expected_sections = {str(i) for i in range(1,28)} | {'appendix'}
+        if set(entries) != expected_sections:
+            errors.append('Migration map must cover source sections 1..27 and appendix')
+        for key, item in entries.items():
+            dest, anchor = item.get('path'), item.get('anchor')
+            if dest not in by_path or anchor not in anchors.get(dest,set()):
+                errors.append(f'Invalid migration destination for source section {key}')
+        counts['mappedSourceSections'] = len(entries)
+
+        original = (ROOT/'archive/design-0.1.md').read_text(encoding='utf-8')
+        old_rows = acceptance_rows(original)
+        if set(old_rows) != expected_tests:
+            errors.append('Unexpected source acceptance test IDs')
+        for test in sorted(expected_tests & set(new_rows)):
+            if new_rows[test] != old_rows[test]:
+                errors.append(f'Acceptance criterion differs from source: {test}; record an intentional migration change before updating the preservation check')
+        counts['unchangedSourceAcceptanceCriteria'] = sum(new_rows.get(t) == old_rows[t] for t in expected_tests)
+
+    scope = 'Project documentation structure only. No product execution or external network checks.'
+    if check_migration:
+        scope = 'Project documentation structure and archived migration evidence only. No product execution or external network checks.'
+    return {'ok':not errors,'counts':counts,'errors':errors,'scope':scope}
 
 
 def main() -> int:

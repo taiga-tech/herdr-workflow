@@ -10,7 +10,7 @@ updated: "2026-09-11"
 
 [文書目次](../README.md) · [更新ルール](../maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
 この文書の管理対象：依存候補、miseとcargo、OS別配布、文書検査。
 
@@ -61,25 +61,26 @@ mise exec -- cargo build --locked --release
 
 Herdrの`plugin install`によるbuild処理と、配布済みバイナリの利用を分けて案内する。Herdrは不足するビルド用ツールチェーンを導入しないため、ソースビルド経路ではRustの導入を前提とする。ローカルの`plugin link`前にもビルドを行う。[S2](../reference/sources.md#s2)
 
-単一バイナリでも、外部の`git`、`herdr`、`mise`、対象コマンドは別途必要である。またOSの動的ライブラリへの依存はビルド条件によるため、配布物ごとに検査する。
+単一バイナリでも、外部の`git`、`herdr`、`mise`、対象コマンドは別途必要である。またOSの動的ライブラリへの依存はビルド条件によるため、成果物ごとに検査する。
 
 Windowsネイティブは、Herdr側でもWindows向け機能の対応状況が個別に案内されている。[S14](../reference/sources.md#s14) named pipe、Job Object、パス表現、環境変数、終了信号、PTY連携の試験が通るまで、Unix版と同じ対応済み表示をしない。WSLはLinux版として扱い、Windows上のプロセスを同時に管理する機能は含めない。
 
 プラグイン無効化時には新しいRunの自動受付と起動を停止する。既に稼働中のRunは無断で破棄せず、`stop`で停止する。Coordinatorは接続先ごとの有効状態を定期的に照合する。アンインストール前に稼働Runと残存状態を確認できる手順を用意する。
 
-## この配布物で実行できる検査
+## 検査
 
-この配布物にはRust実装、`Cargo.toml`、プラグインmanifestを含めていない。上記のcargoコマンドは実装リポジトリを用意した後の手順案である。
+現在はRust実装、`Cargo.toml`、プラグインmanifestが存在しない。上記のcargoコマンドはcrateを初期化した後、このリポジトリで実行する。
 
-文書だけの検査は配布物のルートで実行できる。
+文書の検査はリポジトリルートで実行する。
 
 ```bash
-python3 scripts/check_docs.py
+python3 -B .agents/skills/herdr-workflow-docs/scripts/test_check_docs.py
+python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
 ```
 
-この検査は追加Pythonパッケージを使わない。Markdownの相対リンク、明示アンカー、文書ID、章の移行先、受け入れ試験ID、保存した元資料のハッシュを検査する。Rustのビルド、Herdr通信、設定の意味検証は対象外である。
+このテストと検査は追加Pythonパッケージを使わない。通常はMarkdownの相対リンク、明示アンカー、文書ID、受け入れ試験IDを検査する。`--check-migration`を付けた場合だけ、章の移行先と保存した元資料のハッシュも検査する。Rustのビルド、Herdr通信、設定の意味検証は対象外である。
 
-今後CIへ登録する際も、この文書検査と製品テストは別の結果として表示する。CIの権限やworkflowファイルは、接続先リポジトリを確認してから追加する。
+CIでは文書検査と製品テストを別の結果として表示する。CIの権限やworkflowファイルは、対象リポジトリと必要権限を確認してから追加する。
 
 ## 関連文書
 

@@ -10,24 +10,33 @@ updated: "2026-09-11"
 
 [文書目次](README.md) · [更新ルール](maintenance.md)
 
-> 実装前の設計案です。CLI、設定キー、既定値の動作確認は行っていません。
+> statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
-この文書の管理対象：実在する文書と、今後作成するRustファイルの配置。
+この文書の管理対象：現在のリポジトリ構成と、実装で追加するRustファイルの配置。
 
-## 配布物と実装予定の区別
+## 現在の状態
 
-この配布物に含むのは、分割したMarkdown、設定例、元資料、文書検査スクリプトである。Rustのソースコード、`Cargo.toml`、`Cargo.lock`、`mise.toml`、`herdr-plugin.toml`、JSON Schemaはまだ作成していない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`が存在する。Rustのソースコード、`Cargo.toml`、`Cargo.lock`、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
-## 現在の文書構成
+## 現在のリポジトリ構成
 
 ```text
-herdr-workflow-docs/
-├── README.md                       配布物の入口と導入方法
-├── AGENTS.md                       AIが参照する入口と更新規則
-├── CHANGELOG.md                    文書の変更履歴
+herdr-workflow/
+├── README.md                       製品と開発の入口
+├── AGENTS.md                       AIが参照する開発規則
+├── CHANGELOG.md                    利用者に意味のある変更履歴
 ├── herdr-workflow-design.md        旧名からの案内
+├── mise.toml                       開発ツールとタスク
+├── .agents/skills/
+│   └── herdr-workflow-docs/
+│       ├── SKILL.md                文書同期の判断と手順
+│       ├── agents/openai.yaml      スキルの表示情報
+│       └── scripts/
+│           ├── check_docs.py       文書検査、Python標準ライブラリのみ
+│           └── test_check_docs.py  文書検査モードの回帰テスト
+├── tasks/                          作業計画と教訓。製品文書の対象外
 ├── docs/
 │   ├── README.md                  文書目次と正式な参照先
 │   ├── overview.md                目的と対象範囲
@@ -43,7 +52,7 @@ herdr-workflow-docs/
 │   ├── testing/                   受け入れ試験
 │   ├── planning/                  実装段階と未決事項
 │   ├── decisions/                 ADR
-│   ├── meta/                      章の移行先と検査記録
+│   ├── meta/                      過去文書の移行先と監査記録
 │   └── manifest.json              文書IDとパスの一覧
 ├── examples/
 │   └── workflow.yaml              設定例の編集元
@@ -52,17 +61,15 @@ herdr-workflow-docs/
 │   ├── design-0.1.md              元の設計書、そのまま保存
 │   ├── workflow-0.1.yaml          元の設定例、そのまま保存
 │   └── source-manifest.json       元資料のSHA-256
-└── scripts/
-    └── check_docs.py               文書検査、Python標準ライブラリのみ
 ```
 
 仕様の詳細ファイル名は文書目次で管理する。配置だけを調べる目的では、全本文を読み直す必要はない。
 
 <a id="source-19"></a>
 
-## 実装リポジトリの予定構成
+## 実装で追加する構成
 
-単一crateから開始し、外部APIと実行管理をmoduleで分ける。文書を実装リポジトリに入れた後は、上の`docs/`等を維持して次のファイルを追加する。
+単一crateから開始し、外部APIと実行管理をmoduleで分ける。現在の構成を維持して、実装の進行に応じて次のファイルを追加する。
 
 ```text
 herdr-workflow/
@@ -137,7 +144,7 @@ Rust型を設定定義の基準とし、構造スキーマはそこから生成�
 
 ## 配置時の注意
 
-既存リポジトリに`README.md`や`AGENTS.md`がある場合は、この配布物で置換せず、既存の内容へ文書目次へのリンクと必要な更新規則を取り込む。状態DBや実行ログ、秘密値、解決済み実行環境は文書ディレクトリへ入れない。
+状態DB、実行ログ、秘密値、生成物、一時的な作業記録を文書ディレクトリへ入れない。追跡対象と除外対象は実装時に`.gitignore`と配布仕様で明示する。
 
 ## 関連文書
 

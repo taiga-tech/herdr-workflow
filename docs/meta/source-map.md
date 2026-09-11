@@ -1,7 +1,7 @@
 ---
 id: META-SOURCE-MAP
 title: "元設計書からの移行表"
-status: current
+status: archived
 documentVersion: "0.2"
 updated: "2026-09-11"
 ---

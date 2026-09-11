@@ -1,7 +1,7 @@
 ---
 id: META-VALIDATION
 title: "文書検査の記録"
-status: current
+status: archived
 documentVersion: "0.2"
 updated: "2026-09-11"
 ---
