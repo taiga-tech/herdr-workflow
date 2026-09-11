@@ -17,3 +17,19 @@ run = "uv run --no-project python -B .agents/skills/herdr-workflow-docs/scripts/
 [tasks."docs:audit"]
 description = "Check current documentation and migration records"
 run = "uv run --no-project python -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py --check-migration"
+
+[tasks."rust:fmt"]
+description = "Check Rust formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks."rust:clippy"]
+description = "Lint Rust sources with clippy"
+run = "cargo clippy --locked --all-targets --all-features -- -D warnings"
+
+[tasks."rust:test"]
+description = "Run Rust test suite"
+run = "cargo test --locked"
+
+[tasks."rust:build"]
+description = "Build the release binary"
+run = "cargo build --locked --release"

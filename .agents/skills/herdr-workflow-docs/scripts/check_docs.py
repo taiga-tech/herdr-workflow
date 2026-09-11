@@ -128,11 +128,12 @@ def check(check_migration: bool = False) -> dict:
             errors.append(f'Duplicate explicit anchor: {rel}')
         texts[rel], anchors[rel], edges[rel] = body, set(extracted), set()
 
-    # Agent skills and task notes are development metadata, not product docs.
+    # Agent skills, task notes, and Claude Code plan files are development
+    # metadata, not product docs.
     actual_files = {
         p.relative_to(ROOT).as_posix()
         for p in ROOT.rglob('*.md')
-        if p.relative_to(ROOT).parts[0] not in {'.agents', 'tasks'}
+        if p.relative_to(ROOT).parts[0] not in {'.agents', 'tasks', '.claude'}
     }
     # CLAUDE.md is a tracked alias for AGENTS.md, not a separate document.
     actual_files.discard('CLAUDE.md')

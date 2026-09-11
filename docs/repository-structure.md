@@ -16,7 +16,7 @@ updated: '2026-09-12'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルが存在する。製品用のRustソースコード、ルートの`Cargo.toml`と`Cargo.lock`、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・最小限の`src/main.rs`と`src/lib.rs`が存在する。`WorkflowSpec`等の型定義、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -32,6 +32,11 @@ herdr-workflow/
 ├── .prettierrc.mjs                 文書と設定例の整形規則
 ├── mise.toml                       開発ツールとタスク
 ├── skills-lock.json                外部スキルの導入元とハッシュ
+├── Cargo.toml                      package定義と依存関係
+├── Cargo.lock                      解決済み依存版の固定
+├── src/
+│   ├── main.rs                     エントリポイント
+│   └── lib.rs                      公開APIの起点
 ├── .agents/skills/
 │   ├── herdr-workflow-docs/
 │   │   ├── SKILL.md                文書同期の判断と手順
