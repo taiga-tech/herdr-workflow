@@ -27,6 +27,7 @@ herdr-workflow/
 ├── README.md                       製品と開発の入口
 ├── AGENTS.md                       AIが参照する開発規則
 ├── CHANGELOG.md                    利用者に意味のある変更履歴
+├── .gitignore                      ローカル生成物の除外規則
 ├── herdr-workflow-design.md        旧名からの案内
 ├── mise.toml                       開発ツールとタスク
 ├── .agents/skills/
@@ -36,6 +37,8 @@ herdr-workflow/
 │       └── scripts/
 │           ├── check_docs.py       文書検査、Python標準ライブラリのみ
 │           └── test_check_docs.py  文書検査モードの回帰テスト
+├── .claude/skills/
+│   └── herdr-workflow-docs         .agents側スキルへの相対symlink
 ├── tasks/                          作業計画と教訓。製品文書の対象外
 ├── docs/
 │   ├── README.md                  文書目次と正式な参照先
