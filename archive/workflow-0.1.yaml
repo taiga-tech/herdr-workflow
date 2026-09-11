@@ -12,7 +12,7 @@ inputs:
 
 worktree:
   mode: create
-  branch: "${inputs.branch}"
+  branch: '${inputs.branch}'
   base: main
   existingBranch: use
   ifAlreadyCheckedOut: error
@@ -28,7 +28,7 @@ files:
   requireIgnored: true
 
 defaults:
-  cwd: "${worktree.path}"
+  cwd: '${worktree.path}'
   env:
     NODE_ENV: development
   jobTimeoutSeconds: 900
@@ -75,17 +75,17 @@ tasks:
       - next
       - dev
       - --hostname
-      - "127.0.0.1"
+      - '127.0.0.1'
       - --port
-      - "${inputs.port}"
+      - '${inputs.port}'
     env:
-      PORT: "${inputs.port}"
+      PORT: '${inputs.port}'
     dependsOn:
       - task: generate
         condition: succeeded
     waitFor:
       type: http
-      url: "http://127.0.0.1:${inputs.port}/"
+      url: 'http://127.0.0.1:${inputs.port}/'
       status: 200
       timeoutSeconds: 120
       intervalMilliseconds: 500
@@ -97,9 +97,9 @@ tasks:
     type: command
     lifecycle: job
     runner: supervised
-    argv: [mise, exec, --, pnpm, run, "test:e2e"]
+    argv: [mise, exec, --, pnpm, run, 'test:e2e']
     env:
-      BASE_URL: "http://127.0.0.1:${inputs.port}"
+      BASE_URL: 'http://127.0.0.1:${inputs.port}'
     dependsOn:
       - task: server
         condition: ready
@@ -116,7 +116,7 @@ tasks:
         condition: succeeded
 
 workspace:
-  label: "${inputs.branch}"
+  label: '${inputs.branch}'
   initialTab: preserve
   tabs:
     - id: development

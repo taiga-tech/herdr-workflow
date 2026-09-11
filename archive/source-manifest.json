@@ -1,16 +1,16 @@
 {
     "schemaVersion": 1,
-    "recorded": "2026-09-11",
+    "recorded": "2026-09-12",
     "files": [
         {
             "originalName": "herdr-workflow-design.md",
             "path": "archive/design-0.1.md",
-            "sha256": "7d13857105154ac444b842c2b0d4d2f65ebf1398cfbe1f5b9db9404d5845315e"
+            "sha256": "983b3799ae204ddbd1b7ae5cbbb17f2ef085ccb9cb0975515798eb1acb846805"
         },
         {
             "originalName": "herdr-workflow.example.yaml",
             "path": "archive/workflow-0.1.yaml",
-            "sha256": "e6d6afa9f68b2fe6fe3c1e92c0eb67b019ffbf5efa431f56ff8f845cc942c01e"
+            "sha256": "7190dd3e89a4da07ee06ad5932dbb51412f281eecbcbf87a58b4900249a75022"
         }
     ]
 }
