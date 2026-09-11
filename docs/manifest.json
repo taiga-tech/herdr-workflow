@@ -1,7 +1,7 @@
 {
     "schemaVersion": 1,
     "documentVersion": "0.2",
-    "updated": "2026-09-11",
+    "updated": "2026-09-12",
     "documents": [
         {
             "id": "DOC-AGENTS",
@@ -144,13 +144,6 @@
             "sourceSections": []
         },
         {
-            "id": "META-VALIDATION",
-            "path": "docs/meta/validation-report.md",
-            "title": "文書検査の記録",
-            "status": "archived",
-            "sourceSections": []
-        },
-        {
             "id": "DOC-OVERVIEW",
             "path": "docs/overview.md",
             "title": "概要と対象範囲",
@@ -275,13 +268,6 @@
             "title": "テストと受け入れ条件",
             "status": "draft",
             "sourceSections": [24]
-        },
-        {
-            "id": "DOC-LEGACY-REDIRECT",
-            "path": "herdr-workflow-design.md",
-            "title": "旧設計書からの参照案内",
-            "status": "redirect",
-            "sourceSections": []
         }
     ]
 }
