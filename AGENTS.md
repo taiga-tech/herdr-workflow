@@ -1,9 +1,9 @@
 ---
 id: DOC-AGENTS
-title: "AI作業者向け開発案内"
+title: 'AI作業者向け開発案内'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-12"
+documentVersion: '0.2'
+updated: '2026-09-12'
 ---
 
 # AI作業者向け開発案内

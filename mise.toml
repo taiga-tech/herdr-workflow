@@ -4,7 +4,7 @@ uv = "0.12.11"
 'npm:prettier' = 'latest'
 
 [tasks.format]
-run = 'prettier --write **/*.{md,json,yaml}'
+run = 'prettier --write "**/*.{md,json,yaml}"'
 
 [tasks."docs:test"]
 description = "Run documentation checker regression tests"

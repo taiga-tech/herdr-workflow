@@ -1,9 +1,9 @@
 ---
 id: ADR-0005
-title: "ADR-0005：設定定義と生成スキーマの管理"
+title: 'ADR-0005：設定定義と生成スキーマの管理'
 status: proposed
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # ADR-0005：設定定義と生成スキーマの管理

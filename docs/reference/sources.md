@@ -1,9 +1,9 @@
 ---
 id: REF-SOURCES
-title: "外部仕様と参考資料"
+title: '外部仕様と参考資料'
 status: reference
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 外部仕様と参考資料

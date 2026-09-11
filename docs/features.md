@@ -1,9 +1,9 @@
 ---
 id: DOC-FEATURES
-title: "機能一覧"
+title: '機能一覧'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 機能一覧

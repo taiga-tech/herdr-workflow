@@ -1,9 +1,9 @@
 ---
 id: INT-HERDR
-title: "Herdr連携と表示"
+title: 'Herdr連携と表示'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # Herdr連携と表示

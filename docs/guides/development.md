@@ -1,9 +1,9 @@
 ---
 id: GUIDE-DEVELOPMENT
-title: "開発環境と配布"
+title: '開発環境と配布'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-12"
+documentVersion: '0.2'
+updated: '2026-09-12'
 ---
 
 # 開発環境と配布

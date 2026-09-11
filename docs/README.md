@@ -1,9 +1,9 @@
 ---
 id: DOC-INDEX
-title: "文書目次"
+title: '文書目次'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-12"
+documentVersion: '0.2'
+updated: '2026-09-12'
 ---
 
 # 文書目次

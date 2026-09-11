@@ -1,9 +1,9 @@
 ---
 id: ADR-0004
-title: "ADR-0004：所有権と照合による復旧"
+title: 'ADR-0004：所有権と照合による復旧'
 status: proposed
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # ADR-0004：所有権と照合による復旧

@@ -1,9 +1,9 @@
 ---
 id: DOC-CHANGELOG
-title: "文書変更履歴"
+title: '文書変更履歴'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 文書変更履歴

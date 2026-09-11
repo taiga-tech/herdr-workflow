@@ -1,9 +1,9 @@
 ---
 id: ADR-0003
-title: "ADR-0003：依存条件とreadinessの分離"
+title: 'ADR-0003：依存条件とreadinessの分離'
 status: proposed
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # ADR-0003：依存条件とreadinessの分離

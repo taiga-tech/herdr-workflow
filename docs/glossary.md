@@ -1,9 +1,9 @@
 ---
 id: DOC-GLOSSARY
-title: "用語と所有権"
+title: '用語と所有権'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 用語と所有権

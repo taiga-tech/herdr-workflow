@@ -1,9 +1,9 @@
 ---
 id: SPEC-CLEANUP
-title: "停止と後片付け"
+title: '停止と後片付け'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 停止と後片付け

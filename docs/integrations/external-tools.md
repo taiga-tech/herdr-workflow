@@ -1,9 +1,9 @@
 ---
 id: INT-EXTERNAL
-title: "既存プラグインと外部ツール"
+title: '既存プラグインと外部ツール'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 既存プラグインと外部ツール

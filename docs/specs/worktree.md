@@ -1,9 +1,9 @@
 ---
 id: SPEC-WORKTREE
-title: "worktreeとファイル操作"
+title: 'worktreeとファイル操作'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # worktreeとファイル操作

@@ -1,146 +1,146 @@
 {
-  "schemaVersion": 1,
-  "source": "archive/design-0.1.md",
-  "sections": {
-    "1": {
-      "title": "目的",
-      "path": "docs/overview.md",
-      "anchor": "source-01"
-    },
-    "4": {
-      "title": "実行単位と所有権",
-      "path": "docs/glossary.md",
-      "anchor": "source-04"
-    },
-    "5": {
-      "title": "全体構成",
-      "path": "docs/architecture.md",
-      "anchor": "source-05"
-    },
-    "appendix": {
-      "title": "最初に固定する設計契約",
-      "path": "docs/architecture.md",
-      "anchor": "source-appendix"
-    },
-    "7": {
-      "title": "DAGとスケジューラ",
-      "path": "docs/specs/workflow.md",
-      "anchor": "source-07"
-    },
-    "8": {
-      "title": "gridとペイン配置",
-      "path": "docs/specs/layout.md",
-      "anchor": "source-08"
-    },
-    "9": {
-      "title": "状態モデル",
-      "path": "docs/specs/state-model.md",
-      "anchor": "source-09"
-    },
-    "10": {
-      "title": "コマンドとAgentの実行",
-      "path": "docs/specs/execution.md",
-      "anchor": "source-10"
-    },
-    "11": {
-      "title": "readinessとログ",
-      "path": "docs/specs/observability.md",
-      "anchor": "source-11"
-    },
-    "12": {
-      "title": "worktreeとファイル操作",
-      "path": "docs/specs/worktree.md",
-      "anchor": "source-12"
-    },
-    "13": {
-      "title": "イベント、排他制御、再開",
-      "path": "docs/specs/recovery.md",
-      "anchor": "source-13"
-    },
-    "15": {
-      "title": "状態ストア",
-      "path": "docs/specs/persistence.md",
-      "anchor": "source-15"
-    },
-    "16": {
-      "title": "実行承認と秘密情報",
-      "path": "docs/specs/security.md",
-      "anchor": "source-16"
-    },
-    "17": {
-      "title": "停止と後片付け",
-      "path": "docs/specs/cleanup.md",
-      "anchor": "source-17"
-    },
-    "14": {
-      "title": "Herdr連携と表示",
-      "path": "docs/integrations/herdr.md",
-      "anchor": "source-14"
-    },
-    "21": {
-      "title": "既存プラグインと外部ツール",
-      "path": "docs/integrations/external-tools.md",
-      "anchor": "source-21"
-    },
-    "6": {
-      "title": "設定例",
-      "path": "docs/reference/configuration.md",
-      "anchor": "source-06"
-    },
-    "20": {
-      "title": "CLIとHerdr action",
-      "path": "docs/reference/cli.md",
-      "anchor": "source-20"
-    },
-    "18": {
-      "title": "技術構成",
-      "path": "docs/guides/development.md",
-      "anchor": "source-18"
-    },
-    "22": {
-      "title": "開発環境と配布",
-      "path": "docs/guides/development.md",
-      "anchor": "source-22"
-    },
-    "23": {
-      "title": "実装段階",
-      "path": "docs/planning/roadmap.md",
-      "anchor": "source-23"
-    },
-    "25": {
-      "title": "設計上の保留事項",
-      "path": "docs/planning/open-questions.md",
-      "anchor": "source-25"
-    },
-    "3": {
-      "title": "機能範囲",
-      "path": "docs/features.md",
-      "anchor": "source-03"
-    },
-    "24": {
-      "title": "テストと受け入れ条件",
-      "path": "docs/testing/acceptance.md",
-      "anchor": "source-24"
-    },
-    "2": {
-      "title": "確認した外部仕様",
-      "path": "docs/reference/sources.md",
-      "anchor": "source-02"
-    },
-    "27": {
-      "title": "参考資料",
-      "path": "docs/reference/sources.md",
-      "anchor": "source-27"
-    },
-    "19": {
-      "title": "リポジトリ構成",
-      "path": "docs/repository-structure.md",
-      "anchor": "source-19"
-    },
-    "26": {
-      "title": "これまでの案から変更した点",
-      "path": "CHANGELOG.md",
-      "anchor": "source-26"
+    "schemaVersion": 1,
+    "source": "archive/design-0.1.md",
+    "sections": {
+        "1": {
+            "title": "目的",
+            "path": "docs/overview.md",
+            "anchor": "source-01"
+        },
+        "4": {
+            "title": "実行単位と所有権",
+            "path": "docs/glossary.md",
+            "anchor": "source-04"
+        },
+        "5": {
+            "title": "全体構成",
+            "path": "docs/architecture.md",
+            "anchor": "source-05"
+        },
+        "appendix": {
+            "title": "最初に固定する設計契約",
+            "path": "docs/architecture.md",
+            "anchor": "source-appendix"
+        },
+        "7": {
+            "title": "DAGとスケジューラ",
+            "path": "docs/specs/workflow.md",
+            "anchor": "source-07"
+        },
+        "8": {
+            "title": "gridとペイン配置",
+            "path": "docs/specs/layout.md",
+            "anchor": "source-08"
+        },
+        "9": {
+            "title": "状態モデル",
+            "path": "docs/specs/state-model.md",
+            "anchor": "source-09"
+        },
+        "10": {
+            "title": "コマンドとAgentの実行",
+            "path": "docs/specs/execution.md",
+            "anchor": "source-10"
+        },
+        "11": {
+            "title": "readinessとログ",
+            "path": "docs/specs/observability.md",
+            "anchor": "source-11"
+        },
+        "12": {
+            "title": "worktreeとファイル操作",
+            "path": "docs/specs/worktree.md",
+            "anchor": "source-12"
+        },
+        "13": {
+            "title": "イベント、排他制御、再開",
+            "path": "docs/specs/recovery.md",
+            "anchor": "source-13"
+        },
+        "15": {
+            "title": "状態ストア",
+            "path": "docs/specs/persistence.md",
+            "anchor": "source-15"
+        },
+        "16": {
+            "title": "実行承認と秘密情報",
+            "path": "docs/specs/security.md",
+            "anchor": "source-16"
+        },
+        "17": {
+            "title": "停止と後片付け",
+            "path": "docs/specs/cleanup.md",
+            "anchor": "source-17"
+        },
+        "14": {
+            "title": "Herdr連携と表示",
+            "path": "docs/integrations/herdr.md",
+            "anchor": "source-14"
+        },
+        "21": {
+            "title": "既存プラグインと外部ツール",
+            "path": "docs/integrations/external-tools.md",
+            "anchor": "source-21"
+        },
+        "6": {
+            "title": "設定例",
+            "path": "docs/reference/configuration.md",
+            "anchor": "source-06"
+        },
+        "20": {
+            "title": "CLIとHerdr action",
+            "path": "docs/reference/cli.md",
+            "anchor": "source-20"
+        },
+        "18": {
+            "title": "技術構成",
+            "path": "docs/guides/development.md",
+            "anchor": "source-18"
+        },
+        "22": {
+            "title": "開発環境と配布",
+            "path": "docs/guides/development.md",
+            "anchor": "source-22"
+        },
+        "23": {
+            "title": "実装段階",
+            "path": "docs/planning/roadmap.md",
+            "anchor": "source-23"
+        },
+        "25": {
+            "title": "設計上の保留事項",
+            "path": "docs/planning/open-questions.md",
+            "anchor": "source-25"
+        },
+        "3": {
+            "title": "機能範囲",
+            "path": "docs/features.md",
+            "anchor": "source-03"
+        },
+        "24": {
+            "title": "テストと受け入れ条件",
+            "path": "docs/testing/acceptance.md",
+            "anchor": "source-24"
+        },
+        "2": {
+            "title": "確認した外部仕様",
+            "path": "docs/reference/sources.md",
+            "anchor": "source-02"
+        },
+        "27": {
+            "title": "参考資料",
+            "path": "docs/reference/sources.md",
+            "anchor": "source-27"
+        },
+        "19": {
+            "title": "リポジトリ構成",
+            "path": "docs/repository-structure.md",
+            "anchor": "source-19"
+        },
+        "26": {
+            "title": "これまでの案から変更した点",
+            "path": "CHANGELOG.md",
+            "anchor": "source-26"
+        }
     }
-  }
 }

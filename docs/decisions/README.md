@@ -1,9 +1,9 @@
 ---
 id: ADR-INDEX
-title: "設計判断の記録"
+title: '設計判断の記録'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 設計判断の記録

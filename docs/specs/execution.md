@@ -1,9 +1,9 @@
 ---
 id: SPEC-EXECUTION
-title: "コマンドとAgentの実行"
+title: 'コマンドとAgentの実行'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # コマンドとAgentの実行

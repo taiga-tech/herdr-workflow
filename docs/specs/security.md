@@ -1,9 +1,9 @@
 ---
 id: SPEC-SECURITY
-title: "実行承認と秘密情報"
+title: '実行承認と秘密情報'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 実行承認と秘密情報

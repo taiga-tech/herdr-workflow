@@ -1,9 +1,9 @@
 ---
 id: SPEC-WORKFLOW
-title: "DAGとスケジューラ"
+title: 'DAGとスケジューラ'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # DAGとスケジューラ

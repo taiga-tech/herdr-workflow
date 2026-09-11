@@ -1,9 +1,9 @@
 ---
 id: GUIDE-OPERATIONS
-title: "運用と障害対応の手順案"
+title: '運用と障害対応の手順案'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 運用と障害対応の手順案

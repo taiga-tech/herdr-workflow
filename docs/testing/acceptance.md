@@ -1,9 +1,9 @@
 ---
 id: TEST-ACCEPTANCE
-title: "テストと受け入れ条件"
+title: 'テストと受け入れ条件'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # テストと受け入れ条件

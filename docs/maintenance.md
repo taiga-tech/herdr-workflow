@@ -1,9 +1,9 @@
 ---
 id: DOC-MAINTENANCE
-title: "文書の更新と参照のルール"
+title: '文書の更新と参照のルール'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-12"
+documentVersion: '0.2'
+updated: '2026-09-12'
 ---
 
 # 文書の更新と参照のルール

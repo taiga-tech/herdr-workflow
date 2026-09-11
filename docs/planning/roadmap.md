@@ -1,9 +1,9 @@
 ---
 id: PLAN-ROADMAP
-title: "実装段階"
+title: '実装段階'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 実装段階

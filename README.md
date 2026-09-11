@@ -1,9 +1,9 @@
 ---
 id: DOC-ROOT
-title: "Herdr Workflow"
+title: 'Herdr Workflow'
 status: current
-documentVersion: "0.2"
-updated: "2026-09-12"
+documentVersion: '0.2'
+updated: '2026-09-12'
 ---
 
 # Herdr Workflow

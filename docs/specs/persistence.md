@@ -1,9 +1,9 @@
 ---
 id: SPEC-PERSISTENCE
-title: "状態ストア"
+title: '状態ストア'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 状態ストア

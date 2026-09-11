@@ -1,9 +1,9 @@
 ---
 id: SPEC-STATE
-title: "状態モデル"
+title: '状態モデル'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 状態モデル

@@ -1,9 +1,9 @@
 ---
 id: REF-CONFIGURATION
-title: "設定リファレンス"
+title: '設定リファレンス'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 設定リファレンス

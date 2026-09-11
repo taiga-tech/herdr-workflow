@@ -1,9 +1,9 @@
 ---
 id: REF-CLI
-title: "CLIとHerdr action"
+title: 'CLIとHerdr action'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # CLIとHerdr action

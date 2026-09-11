@@ -1,9 +1,9 @@
 ---
 id: PLAN-QUESTIONS
-title: "未決事項"
+title: '未決事項'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # 未決事項

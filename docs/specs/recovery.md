@@ -1,9 +1,9 @@
 ---
 id: SPEC-RECOVERY
-title: "イベントと復旧"
+title: 'イベントと復旧'
 status: draft
-documentVersion: "0.2"
-updated: "2026-09-11"
+documentVersion: '0.2'
+updated: '2026-09-11'
 ---
 
 # イベントと復旧
