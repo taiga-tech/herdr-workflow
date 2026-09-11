@@ -3,7 +3,7 @@ id: DOC-MAINTENANCE
 title: "文書の更新と参照のルール"
 status: current
 documentVersion: "0.2"
-updated: "2026-09-11"
+updated: "2026-09-12"
 ---
 
 # 文書の更新と参照のルール
@@ -58,7 +58,7 @@ ADRは一つの判断を一つのファイルへ記録する。採用後に方�
 編集対象を目次で確認し、正式な参照先を更新する。影響する例、試験、関連ADRへ反映した後、次の検査を実行する。
 
 ```bash
-python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
+mise run docs:check
 ```
 
 この検査は文書構造の検査であり、製品仕様の正しさや製品試験の成功を証明しない。文書追加・移動時は`docs/manifest.json`も更新する。実行結果はCIや作業結果として記録し、現行仕様へセッション単位のログを追記しない。
@@ -87,4 +87,4 @@ python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
 
 `CHANGELOG.md`、`archive/`、`docs/meta/`は履歴・監査資料であり、現行仕様の説明には使わない。移行や監査を明示的に行う場合を除き、これらへ作業ログを追記しない。
 
-`python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py --check-migration`は、T01〜T32の記述を保存した基準スナップショットと照合する監査用オプションである。通常の文書更新では使用せず、仕様変更は主文書、試験、ADR、利用者に意味のある変更履歴へ反映する。
+`mise run docs:audit`は、T01〜T32の記述を保存した基準スナップショットと照合する監査用タスクである。通常の文書更新では使用せず、仕様変更は主文書、試験、ADR、利用者に意味のある変更履歴へ反映する。

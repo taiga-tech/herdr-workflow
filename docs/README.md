@@ -3,7 +3,7 @@ id: DOC-INDEX
 title: "文書目次"
 status: current
 documentVersion: "0.2"
-updated: "2026-09-11"
+updated: "2026-09-12"
 ---
 
 # 文書目次
@@ -98,4 +98,4 @@ updated: "2026-09-11"
 
 ## 更新時の確認
 
-機能を変更するときは、機能一覧から対象仕様とT番号を確認する。判断を変えるときは新しいADRを作り、仕様・例・試験へ反映する。文書の整合検査はリポジトリルートで`python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py`を実行する。
+機能を変更するときは、機能一覧から対象仕様とT番号を確認する。判断を変えるときは新しいADRを作り、仕様・例・試験へ反映する。文書の整合検査はリポジトリルートで`mise run docs:check`を実行する。

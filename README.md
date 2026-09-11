@@ -3,7 +3,7 @@ id: DOC-ROOT
 title: "Herdr Workflow"
 status: current
 documentVersion: "0.2"
-updated: "2026-09-11"
+updated: "2026-09-12"
 ---
 
 # Herdr Workflow
@@ -34,9 +34,9 @@ Herdrで、worktreeの準備、開発環境の初期化、タスクの依存関�
 ## 文書検査
 
 ```bash
-python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
+mise run docs:check
 ```
 
-Python標準ライブラリだけで動作し、文書の構造と参照整合性を検査する。製品の動作、Rustのコンパイル、Herdr APIへの接続はこの検査の対象外。
+miseタスクは、`mise.toml`で固定したuvとPython標準ライブラリだけで動作し、文書の構造と参照整合性を検査する。製品の動作、Rustのコンパイル、Herdr APIへの接続はこの検査の対象外。
 
 Rust実装の検査方法は[開発ガイド](docs/guides/development.md)、文書更新の規則は[文書更新ルール](docs/maintenance.md)、AIによる作業の入口は[AGENTS.md](AGENTS.md)を参照する。

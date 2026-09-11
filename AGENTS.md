@@ -3,7 +3,7 @@ id: DOC-AGENTS
 title: "AI作業者向け開発案内"
 status: current
 documentVersion: "0.2"
-updated: "2026-09-11"
+updated: "2026-09-12"
 ---
 
 # AI作業者向け開発案内
@@ -33,8 +33,8 @@ updated: "2026-09-11"
 文書検査はリポジトリルートで次を実行する。
 
 ```bash
-python3 -B .agents/skills/herdr-workflow-docs/scripts/test_check_docs.py
-python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
+mise run docs:test
+mise run docs:check
 ```
 
 Rust実装・Herdr動作・実Agent起動を検査していないときは、その検査が成功したと報告しない。文書の構造検査、Rustの検査、製品の受け入れ試験は別である。

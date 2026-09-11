@@ -29,8 +29,8 @@ description: Herdr Workflow のコード、設定、CLI、設計判断、試験�
 リポジトリルートで次を実行する。
 
 ```bash
-python3 -B .agents/skills/herdr-workflow-docs/scripts/test_check_docs.py
-python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
+mise run docs:test
+mise run docs:check
 ```
 
 Rustコードを変更した場合は、`docs/guides/development.md`に記載された該当チェックも実行する。文書検査、Rustテスト、Herdr実機試験、実Agent起動は別々の検証として報告し、実行していない検査を成功扱いしない。

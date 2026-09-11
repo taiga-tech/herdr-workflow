@@ -3,7 +3,7 @@ id: GUIDE-DEVELOPMENT
 title: "開発環境と配布"
 status: draft
 documentVersion: "0.2"
-updated: "2026-09-11"
+updated: "2026-09-12"
 ---
 
 # 開発環境と配布
@@ -74,11 +74,11 @@ Windowsネイティブは、Herdr側でもWindows向け機能の対応状況が�
 文書の検査はリポジトリルートで実行する。
 
 ```bash
-python3 -B .agents/skills/herdr-workflow-docs/scripts/test_check_docs.py
-python3 -B .agents/skills/herdr-workflow-docs/scripts/check_docs.py
+mise run docs:test
+mise run docs:check
 ```
 
-このテストと検査は追加Pythonパッケージを使わない。通常はMarkdownの相対リンク、明示アンカー、文書ID、受け入れ試験IDを検査する。`--check-migration`を付けた場合だけ、章の移行先と保存した元資料のハッシュも検査する。Rustのビルド、Herdr通信、設定の意味検証は対象外である。
+これらのmiseタスクは固定したuvからPythonスクリプトを実行し、追加Pythonパッケージを使わない。通常はMarkdownの相対リンク、明示アンカー、文書ID、受け入れ試験IDを検査する。`mise run docs:audit`を実行した場合だけ、章の移行先と保存した元資料のハッシュも検査する。Rustのビルド、Herdr通信、設定の意味検証は対象外である。
 
 CIでは文書検査と製品テストを別の結果として表示する。CIの権限やworkflowファイルは、対象リポジトリと必要権限を確認してから追加する。
 
