@@ -3,7 +3,7 @@ id: META-SOURCE-MAP
 title: '元設計書からの移行表'
 status: archived
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-12'
 ---
 
 # 元設計書からの移行表
@@ -58,8 +58,8 @@ updated: '2026-09-11'
 
 機械可読の対応表は[migration.json](migration.json)、元資料のハッシュは[保存記録](../../archive/source-manifest.json)。検査スクリプトは27章と付録の移管先、およびアンカーの存在を検査する。
 
-元資料のハッシュと移管先の存在だけで、意味が同一であることを証明したとは扱わない。本文の移管と例・試験の保持は、今回の検査記録に実施内容を区別して記載する。
+元資料のハッシュと移管先の存在だけで、意味が同一であることを証明したとは扱わない。移管時の一回限りの検査結果は現行文書として保持せず、必要な場合はGit履歴で確認する。
 
 ## 関連文書
 
-[元資料](../../archive/README.md) / [検査記録](validation-report.md)
+[元資料](../../archive/README.md)

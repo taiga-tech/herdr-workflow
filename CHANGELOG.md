@@ -3,12 +3,16 @@ id: DOC-CHANGELOG
 title: '文書変更履歴'
 status: current
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-12'
 ---
 
 # 文書変更履歴
 
 [文書目次](docs/README.md) · [更新ルール](docs/maintenance.md)
+
+## 文書版0.2 — 2026-09-12
+
+固有の仕様を持たない旧設計書パスの案内と、移管時の一回限りの検査結果を削除した。元資料と移行表は監査用に維持し、誤って整形されていた元資料を記録済みの原本へ復元した。
 
 ## 文書版0.2 — 2026-09-11
 
@@ -40,4 +44,4 @@ worktree作成後に初期化し、その後でHerdr workspaceを作るという
 
 ## 関連文書
 
-[移行表](docs/meta/source-map.md) / [検査記録](docs/meta/validation-report.md)
+[移行表](docs/meta/source-map.md)

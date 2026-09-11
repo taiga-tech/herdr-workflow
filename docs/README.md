@@ -84,13 +84,11 @@ updated: '2026-09-12'
 
 以下は現行仕様ではなく、文書移行時の追跡と監査に限って参照する。
 
-| 文書ID                | 文書                                                  | 状態       |
-| --------------------- | ----------------------------------------------------- | ---------- |
-| `DOC-CHANGELOG`       | [変更履歴](../CHANGELOG.md)                           | `current`  |
-| `META-SOURCE-MAP`     | [元設計書からの移行表](meta/source-map.md)            | `archived` |
-| `META-VALIDATION`     | [文書検査の記録](meta/validation-report.md)           | `archived` |
-| `ARCHIVE-INDEX`       | [元資料の保存](../archive/README.md)                  | `archived` |
-| `DOC-LEGACY-REDIRECT` | [旧設計書からの参照案内](../herdr-workflow-design.md) | `redirect` |
+| 文書ID            | 文書                                       | 状態       |
+| ----------------- | ------------------------------------------ | ---------- |
+| `DOC-CHANGELOG`   | [変更履歴](../CHANGELOG.md)                | `current`  |
+| `META-SOURCE-MAP` | [元設計書からの移行表](meta/source-map.md) | `archived` |
+| `ARCHIVE-INDEX`   | [元資料の保存](../archive/README.md)       | `archived` |
 
 ## 設定例と機械可読の一覧
 

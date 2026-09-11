@@ -3,7 +3,7 @@ id: DOC-STRUCTURE
 title: 'ディレクトリ構成'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-12'
 ---
 
 # ディレクトリ構成
@@ -16,7 +16,7 @@ updated: '2026-09-11'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`が存在する。Rustのソースコード、`Cargo.toml`、`Cargo.lock`、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルが存在する。製品用のRustソースコード、ルートの`Cargo.toml`と`Cargo.lock`、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -26,19 +26,23 @@ updated: '2026-09-11'
 herdr-workflow/
 ├── README.md                       製品と開発の入口
 ├── AGENTS.md                       AIが参照する開発規則
+├── CLAUDE.md                       AGENTS.mdへの相対symlink
 ├── CHANGELOG.md                    利用者に意味のある変更履歴
 ├── .gitignore                      ローカル生成物の除外規則
-├── herdr-workflow-design.md        旧名からの案内
+├── .prettierrc.mjs                 文書と設定例の整形規則
 ├── mise.toml                       開発ツールとタスク
+├── skills-lock.json                外部スキルの導入元とハッシュ
 ├── .agents/skills/
-│   └── herdr-workflow-docs/
-│       ├── SKILL.md                文書同期の判断と手順
-│       ├── agents/openai.yaml      スキルの表示情報
-│       └── scripts/
-│           ├── check_docs.py       文書検査、Python標準ライブラリのみ
-│           └── test_check_docs.py  文書検査モードの回帰テスト
+│   ├── herdr-workflow-docs/
+│   │   ├── SKILL.md                文書同期の判断と手順
+│   │   ├── agents/openai.yaml      スキルの表示情報
+│   │   └── scripts/
+│   │       ├── check_docs.py       文書検査、Python標準ライブラリのみ
+│   │       └── test_check_docs.py  文書検査モードの回帰テスト
+│   └── rust-skills/                外部導入したRust開発ガイド
 ├── .claude/skills/
-│   └── herdr-workflow-docs         .agents側スキルへの相対symlink
+│   ├── herdr-workflow-docs         .agents側スキルへの相対symlink
+│   └── rust-skills                 .agents側スキルへの相対symlink
 ├── tasks/                          作業計画と教訓。製品文書の対象外
 ├── docs/
 │   ├── README.md                  文書目次と正式な参照先
@@ -55,7 +59,7 @@ herdr-workflow/
 │   ├── testing/                   受け入れ試験
 │   ├── planning/                  実装段階と未決事項
 │   ├── decisions/                 ADR
-│   ├── meta/                      過去文書の移行先と監査記録
+│   ├── meta/                      元資料と現行文書の移行対応表
 │   └── manifest.json              文書IDとパスの一覧
 ├── examples/
 │   └── workflow.yaml              設定例の編集元
