@@ -92,3 +92,33 @@ uv `0.12.11`を`mise.toml`で固定し、現行の実行例を`uv run --no-proje
 - [x] formatコミットを作成し、commitと残る作業ツリーを確認する
 
 `archive`のMarkdownとYAMLのformat差分を採用し、`source-manifest.json`の記録日とSHA-256を更新する。未追跡の`.claude/plans/`は対象外とする。
+
+## 実装：WorkflowSpec / ExecutionPlan / TaskState / AttemptResult
+
+docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満たす。計画詳細は`.claude/plans/vivid-swinging-toucan.md`。
+
+### 計画
+
+- [x] `Cargo.toml`に`serde_yaml_ng`を追加し`cargo build --locked`を通す
+- [x] `src/config/model.rs`を実装し、`examples/workflow.yaml`と目視で突き合わせる
+- [x] `src/config/load.rs`を実装する(YAML読み込みのみ、意味検証はしない)
+- [x] `src/plan/graph.rs`を実装しトポロジカルソート・循環検出のテストを書く
+- [x] `src/plan/compile.rs`を実装し`ExecutionPlan`とcompileエラーのテストを書く(T02/T03対応含む)
+- [x] `src/state/models.rs`を実装し`TaskState`/`AttemptResult`のテストを書く
+- [x] `src/plan/schedule.rs`を実装し、4つの固定動作(初期化失敗時Agent起動抑止/service ready後のE2E/再開時二重起動防止/resumeでタブ非置換)をテストで固定する
+- [x] `tests/workflow_contract.rs`で設定例の実読み込み+compileを固定する(T01対応含む)
+- [x] `src/lib.rs`のmod宣言を更新する
+- [x] `mise run rust:fmt` / `rust:clippy` / `rust:test`を通す
+- [x] `herdr-workflow-docs`スキルで関連文書(architecture.md、repository-structure.md、ADR-0005、workflow.md、open-questions.md)を同期する
+- [x] `mise run docs:test` / `docs:check`を通す
+- [x] 検証結果と残課題をレビューへ記録する
+
+### レビュー
+
+- `WorkflowSpec`/`ExecutionPlan`/`TaskState`/`AttemptResult`の4型と、`src/config/model.rs`・`src/config/load.rs`・`src/plan/graph.rs`・`src/plan/compile.rs`・`src/plan/schedule.rs`・`src/state/models.rs`を実装した。`examples/workflow.yaml`は`serde_yaml_ng`で実読み込みでき、`WorkflowSpec` -> `ExecutionPlan`のcompileが通る。
+- 契約が要求する4つの固定動作(初期化失敗時のAgent起動抑止、serviceのready後のE2E実行、再開時の二重起動防止、resumeでのタブ非置換)を`src/plan/schedule.rs`の純粋関数`runnable_tasks`/`tabs_to_create`とそのテストで固定した。
+- T01(未知キー拒否)、T02(循環依存)、T03(service/agentへのsucceeded依存・jobへのready依存の拒否)に対応するテストも合わせて追加した。
+- 新規依存として`serde_yaml_ng`をCargo.tomlへ追加した(`serde_yaml`はアーカイブ済みのため)。ADR-0005にこの決定を追記し、状態は`proposed`のまま維持した(値置換・重複キー検出等の他の採用条件は未解決のため)。
+- `docs/architecture.md`(実装済み範囲の追記)、`docs/repository-structure.md`(実際の構成・`plan/schedule.rs`の反映)、`docs/planning/open-questions.md`(Q11に未実装バリアントを追記)、`docs/specs/workflow.md`(依存条件の拒否対象を明確化)を同期した。
+- `cargo test --locked`(37件)、`cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`mise run docs:test`、`mise run docs:check`、`prettier --check`が全て成功した。Herdr実機動作・実Agent起動は対象が存在しないため未実施。
+- 未対応のまま残した範囲(次段階):`config/validate.rs`(未定義変数・重複キー検出)、`plan/layout.rs`(grid変換)、`runtime/*`・`herdr/*`等のHerdrAdapter接続、`schema/workflow.schema.json`生成。

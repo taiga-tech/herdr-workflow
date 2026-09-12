@@ -16,7 +16,7 @@ updated: '2026-09-12'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・最小限の`src/main.rs`と`src/lib.rs`が存在する。`WorkflowSpec`等の型定義、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、および`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)と契約試験(`tests/workflow_contract.rs`)が存在する。`herdr-plugin.toml`、JSON Schema、意味検証(`config/validate.rs`)、layout変換(`plan/layout.rs`)、Herdr接続以降のmoduleはまだ存在しない。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -36,7 +36,18 @@ herdr-workflow/
 ├── Cargo.lock                      解決済み依存版の固定
 ├── src/
 │   ├── main.rs                     エントリポイント
-│   └── lib.rs                      公開APIの起点
+│   ├── lib.rs                      公開APIの起点
+│   ├── config/
+│   │   ├── model.rs                WorkflowSpec等の設定型
+│   │   └── load.rs                 YAML読み込み(意味検証は含まない)
+│   ├── plan/
+│   │   ├── graph.rs                TaskIdのトポロジカルソートと循環検出
+│   │   ├── compile.rs              WorkflowSpec -> ExecutionPlanのcompile
+│   │   └── schedule.rs             依存判定を行う副作用なしの純粋関数群
+│   └── state/
+│       └── models.rs               TaskState、AttemptResult等
+├── tests/
+│   └── workflow_contract.rs        設定例の実読み込みとcompileの契約試験
 ├── .agents/skills/
 │   ├── herdr-workflow-docs/
 │   │   ├── SKILL.md                文書同期の判断と手順
@@ -102,6 +113,7 @@ herdr-workflow/
 │   ├── plan/
 │   │   ├── graph.rs
 │   │   ├── compile.rs
+│   │   ├── schedule.rs             依存判定を行う副作用なしの純粋関数群
 │   │   └── layout.rs
 │   ├── runtime/
 │   │   ├── coordinator.rs

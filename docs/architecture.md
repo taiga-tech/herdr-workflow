@@ -3,7 +3,7 @@ id: DOC-ARCHITECTURE
 title: 'アーキテクチャ'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-12'
 ---
 
 # アーキテクチャ
@@ -79,6 +79,8 @@ hookは環境変数からイベントと対象を受け取り、Coordinatorの�
 最初の実装着手点は、`WorkflowSpec`、`ExecutionPlan`、`TaskState`、`AttemptResult`の四つの型と、それを検証するテストとする。
 
 設定例から計画を生成し、「初期化失敗時はAgentを起動しない」「serviceのready後にE2Eを実行する」「再開時に既存タスクを二重起動しない」「resumeで既存タブを置換しない」をテストで固定する。その後にHerdrAdapterを接続する。
+
+上記四型と四つの固定動作は`src/config/model.rs`・`src/plan/compile.rs`・`src/state/models.rs`・`src/plan/schedule.rs`の実装と`cargo test`の成功で確認できる。未定義変数や値置換の検証、layout変換、HerdrAdapter接続はこの範囲に含めていない。
 
 ## 設計判断の状態
 

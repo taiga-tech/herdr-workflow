@@ -3,7 +3,7 @@ id: ADR-0005
 title: 'ADR-0005：設定定義と生成スキーマの管理'
 status: proposed
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-12'
 ---
 
 # ADR-0005：設定定義と生成スキーマの管理
@@ -31,6 +31,10 @@ Rust型と生成スキーマが存在しない状態では、文書検査の合�
 ## 採用条件
 
 未知キーと重複キー、値置換、参照、DAG、gridの検証を実装し、Q11の未定義キーを決める。YAMLライブラリの版は依存関係の確認を経て選定する。
+
+## YAMLライブラリの選定
+
+`serde_yaml`は開発が停止しアーカイブされているため、そのフォークである`serde_yaml_ng`をCargo.tomlの依存として採用した(`src/config/load.rs`)。未知キーの拒否は`WorkflowSpec`側の`deny_unknown_fields`で実装済みだが、重複キー検出、値置換、DAGの意味検証の一部、gridの検証は未実装のため、他の採用条件は引き続き未解決として扱い、この文書の状態は`proposed`のまま維持する。
 
 ## 関連文書
 
