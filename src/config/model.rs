@@ -1,6 +1,50 @@
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
+
+/// `BTreeMap<K, V>`は`insert`が後勝ちで上書きするため、標準の`Deserialize`実装は
+/// 重複キーを検出しない(固定フィールド構造体はserde-deriveが標準で検出する)。
+/// このヘルパーをmapフィールドに`#[serde(deserialize_with = "...")]`で適用し、
+/// 重複キーをエラーにする(T01)。
+fn no_duplicate_map<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: Deserialize<'de> + Ord + fmt::Debug,
+    V: Deserialize<'de>,
+{
+    struct MapVisitor<K, V>(std::marker::PhantomData<(K, V)>);
+
+    impl<'de, K, V> serde::de::Visitor<'de> for MapVisitor<K, V>
+    where
+        K: Deserialize<'de> + Ord + fmt::Debug,
+        V: Deserialize<'de>,
+    {
+        type Value = BTreeMap<K, V>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a map with unique keys")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut result = BTreeMap::new();
+            while let Some((key, value)) = map.next_entry::<K, V>()? {
+                let key_debug = format!("{key:?}");
+                if result.insert(key, value).is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "duplicate key {key_debug}"
+                    )));
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    deserializer.deserialize_map(MapVisitor(std::marker::PhantomData))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(transparent)]
@@ -35,7 +79,7 @@ pub struct PaneId(pub String);
 pub struct WorkflowSpec {
     pub version: u32,
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "no_duplicate_map")]
     pub inputs: BTreeMap<InputId, InputDef>,
     pub worktree: WorktreeConfig,
     #[serde(default)]
@@ -43,6 +87,7 @@ pub struct WorkflowSpec {
     #[serde(default)]
     pub defaults: Option<DefaultsConfig>,
     pub bootstrap: BootstrapConfig,
+    #[serde(deserialize_with = "no_duplicate_map")]
     pub tasks: BTreeMap<TaskId, TaskDef>,
     pub workspace: WorkspaceConfig,
     #[serde(default)]
@@ -163,7 +208,7 @@ pub enum SymlinkPolicy {
 pub struct DefaultsConfig {
     #[serde(default)]
     pub cwd: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "no_duplicate_map")]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub job_timeout_seconds: Option<u64>,
@@ -183,7 +228,7 @@ pub enum TaskDef {
         lifecycle: TaskLifecycle,
         runner: RunnerKind,
         argv: Vec<String>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "no_duplicate_map")]
         env: BTreeMap<String, String>,
         #[serde(default)]
         depends_on: Vec<DependsOn>,
@@ -433,5 +478,45 @@ mod tests {
             TaskDef::Command { lifecycle, .. } => assert_eq!(*lifecycle, TaskLifecycle::Service),
             TaskDef::Agent { .. } => panic!("server task should be a command"),
         }
+    }
+
+    #[test]
+    fn duplicate_input_key_is_rejected() {
+        let yaml = example_yaml().replacen(
+            "inputs:\n  branch:",
+            "inputs:\n  branch:\n    type: string\n  branch:",
+            1,
+        );
+        assert!(serde_yaml_ng::from_str::<WorkflowSpec>(&yaml).is_err());
+    }
+
+    #[test]
+    fn duplicate_task_key_is_rejected() {
+        let yaml = example_yaml().replacen(
+            "toolchain:\n    type: command",
+            "toolchain:\n    type: command\n    lifecycle: job\n    runner: supervised\n    argv: [mise, install]\n  toolchain:\n    type: command",
+            1,
+        );
+        assert!(serde_yaml_ng::from_str::<WorkflowSpec>(&yaml).is_err());
+    }
+
+    #[test]
+    fn duplicate_env_key_inside_task_is_rejected() {
+        let yaml = example_yaml().replacen(
+            "env:\n      PORT: '${inputs.port}'",
+            "env:\n      PORT: '${inputs.port}'\n      PORT: '3001'",
+            1,
+        );
+        assert!(serde_yaml_ng::from_str::<WorkflowSpec>(&yaml).is_err());
+    }
+
+    #[test]
+    fn duplicate_defaults_env_key_is_rejected() {
+        let yaml = example_yaml().replacen(
+            "env:\n    NODE_ENV: development",
+            "env:\n    NODE_ENV: development\n    NODE_ENV: production",
+            1,
+        );
+        assert!(serde_yaml_ng::from_str::<WorkflowSpec>(&yaml).is_err());
     }
 }
