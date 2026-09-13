@@ -228,3 +228,112 @@ docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満�
 - 残っていた`tasks/lessons.md`・`tasks/todo.md`の更新分を、製品変更と分離した作業記録のコミットとしてまとめた。
 - 最終状態で`cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked`(単体81件+統合6件の計87件)、`mise run docs:test`(3件)、`mise run docs:check`、`prettier --check`をすべて再実行し、成功を確認した。
 - `git status --short`で作業ツリーがクリーンであること、`git log`で6コミット(段階Aの最初の設計契約1件+今回の5件)がブランチ`feature/workflow-core-contract`に積まれていること、`git log origin/develop..HEAD`相当の比較でリモートに未pushであることを確認した。
+
+## 実装:並行実行設定値の意味検証(段階A残課題)
+
+計画詳細は`.claude/plans/vivid-swinging-toucan.md`。`execution.maxConcurrentJobs`/`maxLiveServices`/`maxLiveAgents`が`Some(0)`の場合を拒否する。`files.copy`の追跡済みファイル判定・JSON Schema生成・`herdr-plugin.toml`は今回も対象外(前者は段階Bへ先送り、後2つは未確定仕様のため)。
+
+### 計画
+
+- [x] `src/config/validate.rs`に`ValidateError::ZeroExecutionLimit`と`validate_execution_limits`を追加し`validate()`から呼ぶ
+- [x] `zero_max_concurrent_jobs_is_rejected` / `zero_max_live_services_is_rejected` / `zero_max_live_agents_is_rejected` / `none_execution_limits_are_accepted` / `retries_zero_is_accepted`のテストを追加する
+- [x] `src/plan/compile.rs`に`compile_rejects_spec_with_zero_execution_limit`テストを追加する
+- [x] `mise run rust:fmt` / `rust:clippy` / `rust:test`を通す
+- [x] `cargo run -- validate --config examples/workflow.yaml`が引き続き成功することを確認する
+- [x] `herdr-workflow-docs`スキルで`docs/planning/roadmap.md`の残課題記述を更新する
+- [x] `mise run docs:test` / `docs:check` / `prettier --check`を通す
+- [x] 検証結果と残課題をレビューへ記録する
+
+### レビュー
+
+- `src/config/validate.rs`に`validate_execution_limits`を追加し、`execution.maxConcurrentJobs`/`maxLiveServices`/`maxLiveAgents`が`Some(0)`の場合を`ValidateError::ZeroExecutionLimit`で拒否するようにした。`None`(制限なし)と`retries: 0`は正当な値として許容する。
+- `src/plan/compile.rs`(`compile/tests.rs`)に`compile_rejects_spec_with_zero_execution_limit`を追加し、`compile()`経由でも`CompileError::Invalid`として伝播することを確認した。
+- テストは単体87件+統合6件の計93件(6件増加)全通過。`cargo fmt`/`clippy -D warnings`/`cargo run -- validate`(既存examples/workflow.yamlは4/8/4のため無影響)がすべて成功した。
+- `docs/planning/roadmap.md`の「段階Aの進行状況」を更新し、並行実行設定値の意味検証を解消済みとして本文に統合、残る未解消項目(`files.copy`の追跡済みファイル判定、JSON Schema生成、`herdr-plugin.toml`)だけを残した。`mise run docs:test`/`docs:check`/`prettier --check`成功。
+- ユーザー確認済みの通り、`files.copy`の追跡済みファイル判定は段階Bへ先送り、JSON Schema生成と`herdr-plugin.toml`は仕様未確定のため今回も対象外とした。段階Aはこれらの解消後に完了とする。
+
+## 調査:herdr-plugin.tomlの実機仕様確認
+
+「本文にないキーを推測して追加しない」「Herdrに存在するAPIを推測せず、対象版の仕様または実機で確認する」というCLAUDE.mdの方針に従い、`herdr-plugin.toml`の仕様を実機のHerdr(v0.9.0、ローカルインストール済み)で確認した。
+
+### 計画
+
+- [x] `herdr --help`/`herdr integration --help`/`herdr api --help`で、プラグイン登録機構が実際に存在するか確認する
+- [x] `herdr api schema --json`でSocket APIスキーマを取得し、`InstalledPluginInfo`および`PluginManifest*`系の型定義を抽出する
+- [x] `herdr --skill`が案内する公式ドキュメント(v0.9.0タグのplugins.mdx)を取得し、実機スキーマとの整合を確認する
+- [x] 確認結果を`docs/reference/cli.md`・`docs/integrations/herdr.md`・`docs/reference/sources.md`へ反映する
+- [x] `mise run docs:test` / `docs:check` / `prettier --check`を通す
+
+### レビュー
+
+- `herdr integration`はAIエージェント(Claude/Codex等)へのフック統合管理であり、`herdr-workflow`のような外部ワークフロープラグインの登録機構とは別物と判明した。プラグイン登録は`herdr plugin link`/`herdr plugin install`(ヘルプ非表示だが公式docsに記載)で行う。
+- `herdr api schema --json`から`herdr-plugin.toml`が実行時に`InstalledPluginInfo`型としてロードされることを確認した。必須フィールド`id`/`name`/`version`/`min_herdr_version`、セクション`[[actions]]`(id/title/command/contexts/description?/platforms?)/`[[panes]]`(id/title/command/placement?/width?/height?/description?/platforms?)/`[[startup]]`/`[[events]]`/`[[link_handlers]]`/`[[build]]`を実機スキーマとv0.9.0タグの公式ドキュメントの両方で確認し、内容が一致することを確かめた。
+- `docs/reference/cli.md`のHerdr action節、`docs/integrations/herdr.md`の互換性の記録節、`docs/reference/sources.md`(確認した外部仕様表・S1/S2参照・外部仕様の再確認記録の新設表)を更新した。対応下限(`min_herdr_version`の具体的な値)は引き続き未決定のまま。
+- ユーザー確認済みの通り、今回は文書反映のみに留め、`herdr-plugin.toml`実ファイルの作成は次回以降とした。
+- `mise run docs:test`(3件)、`mise run docs:check`、`prettier --check`が成功した。一時的な調査ファイル(`/tmp/herdr_api_schema.json`)は削除済み。
+
+## 実装:herdr-plugin.tomlの作成
+
+前段の調査結果に基づき、`herdr-plugin.toml`をリポジトリルートに作成し実機検証する。
+
+### 計画
+
+- [x] `herdr plugin --help`でサブコマンド(`link`/`unlink`/`list`/`action`/`log`)を確認する
+- [x] `herdr-plugin.toml`を作成する(`id`/`name`/`version`/`min_herdr_version`/`description`/`platforms`、`[[build]]`、`validate`のみの`[[actions]]`)
+- [x] `cargo build --release`でバイナリを生成する
+- [x] `herdr plugin link`で実機にリンクし、`action list`/`action invoke`/`plugin log`で成功時(exit 0)・失敗時(exit 2)の両方を確認する
+- [x] 検証後`herdr plugin unlink`で環境を元に戻す
+- [x] `docs/architecture.md`・`docs/planning/roadmap.md`・`docs/repository-structure.md`を更新する
+- [x] `mise run rust:fmt` / `rust:clippy` / `rust:test`、`mise run docs:test` / `docs:check` / `prettier --check`を通す
+- [x] 検証結果と残課題をレビューへ記録する
+
+### レビュー
+
+- `herdr-plugin.toml`を作成した。`id="herdr-workflow"`、`min_herdr_version="0.9.0"`(実機確認済みのバージョンに合わせた)、`platforms=["linux","macos"]`(Windowsは受け入れ試験T32が未実施のため対象外)。`[[build]]`は`cargo build --release`。`[[actions]]`には`validate`のみ登録し、`plan`は`--input`必須で単純呼び出しでは機能しないため見送った(段階Cで対話的な`[[panes]]`を実装する際に検討する)。
+- 実機のHerdr v0.9.0で`herdr plugin link "$(pwd)"`→`herdr plugin action list`→`herdr plugin action invoke validate --plugin herdr-workflow`→`herdr plugin log`の手順で動作確認した。`.herdr/workflow.yaml`が存在しない状態では`exit_code=2`・`stdout`に読み込みエラーメッセージ、`examples/workflow.yaml`を一時的に`.herdr/workflow.yaml`へ配置した状態では`exit_code=0`・`stdout="設定は妥当です"`となり、両方とも期待通りだった。検証後`herdr plugin unlink herdr-workflow`で環境を元に戻し、一時検証用の`.herdr/`ディレクトリも削除した。
+- `docs/architecture.md`(最初に固定する設計契約の続き)、`docs/planning/roadmap.md`(段階Aの進行状況、`herdr-plugin.toml`を残課題から除外)、`docs/repository-structure.md`(現在の状態・現在のリポジトリ構成ツリー)を実機検証結果に基づいて更新した。
+- `cargo fmt`/`clippy -D warnings`/`cargo test`(単体87件+統合6件の計93件、変更なし)、`mise run docs:test`/`docs:check`/`prettier --check`がすべて成功した。
+- 段階Aの未解消項目は`files.copy`の追跡済みファイル判定(段階Bへ先送り)とJSON Schema生成の2点のみに減った。
+- 作業中に、このセッションで変更していない`mise.toml`の差分(`format`タスクの分割、`prettier:fmt`タスクの新設)がステージ済みの状態で見つかった。原因不明のため、コミット対象から分離しユーザーへ報告する。
+
+## 実装:JSON Schema生成(段階Aの限界)
+
+計画詳細は`.claude/plans/vivid-swinging-toucan.md`。`files.copy`の追跡済みファイル判定は実Git状態が必要で段階Bの領域のため対象外とし、JSON Schema生成のみを実装して段階Aの技術的に実装可能な範囲を完了させる。
+
+### 計画
+
+- [x] `cargo add schemars`(通常依存)、`cargo add jsonschema`(dev依存)を追加する
+- [x] `src/config/model.rs`の全42公開型に`JsonSchema`deriveを追加し、既存serde属性(transparent/tag/untagged/deserialize_with)との組み合わせをビルドで確認する
+- [x] `src/cli.rs`に`schema [--output PATH]`サブコマンドを追加しテストを書く
+- [x] `cargo run -- schema --output schema/workflow.schema.json`で生成物を作成する
+- [x] `tests/schema_contract.rs`を新規作成し、`jsonschema`で`examples/workflow.yaml`の妥当性を検証する
+- [x] `docs/reference/cli.md`にコマンドを追記する
+- [x] `docs/planning/roadmap.md`の段階Aの進行状況を更新する
+- [x] `mise run rust:fmt` / `rust:clippy` / `rust:test`、`mise run docs:test` / `docs:check` / `prettier --check`を通す
+- [x] 検証結果と残課題をレビューへ記録する
+
+### レビュー
+
+- `schemars`(v1.2.2、通常依存)と`jsonschema`(v0.56.0、dev依存)を追加した。`jsonschema`はreqwest等の推移的依存を多く引き込みビルド時間が伸びる(dev依存のみでテスト専用、本番`cargo build --release`には影響しない)。
+- `src/config/model.rs`の全42公開型に`schemars::JsonSchema`をderiveした。懸念していた`#[serde(transparent)]`のnewtype、`#[serde(tag = "type")]`の内部タグ付きenum、`#[serde(untagged)]`のenum、`#[serde(deserialize_with = "no_duplicate_map")]`のフィールドはすべて追加コード無しでビルドが通り、生成されたJSON Schemaを目視確認したところ`oneOf`+`const`判別・`anyOf`・`additionalProperties`がそれぞれ正しく表現されていた。
+- `src/cli.rs`に`schema [--output PATH]`サブコマンドを追加した(既存の共通フラグ解析ループへ`--output`を追加する形)。`--output`未指定時はstdoutへ、指定時はファイルへ書き込む。テスト4件(引数パース2件、stdout出力1件、ファイル書き込み1件)を追加した。
+- `schema/workflow.schema.json`を生成しリポジトリに追跡した(`.gitignore`に`schema/`の除外はない)。
+- `tests/schema_contract.rs`(新規)で、(1)`examples/workflow.yaml`が生成スキーマに対して妥当であること、(2)`version`に文字列を入れる等の構造違反がスキーマレベルで拒否されること、(3)循環依存を追加した設定が構造的にはスキーマを通過するが`plan::compile::compile`では拒否されること、の3点を確認し、「JSON Schemaは構造検証のみを担い、DAG・gridの意味検証はRust側が担う」というADR-0005の役割分担を実証した。
+- `docs/reference/cli.md`(コマンド一覧・実行例)、`docs/reference/configuration.md`(仕様化の残件)、`docs/decisions/0005-configuration-source.md`(JSON Schema生成の実装を追記、Q11未解決のため状態は`proposed`のまま維持)、`docs/guides/development.md`(スキーマ出力の候補→採用済みに更新、かつ「Rust実装が存在しない」という古い記述を修正)、`docs/planning/roadmap.md`(段階Aとして技術的に実装可能な範囲が完了したことを記録)、`docs/repository-structure.md`(schema/・tests/schema_contract.rsの反映)、`docs/architecture.md`(最初に固定する設計契約の続き)を更新した。
+- `cargo fmt`/`clippy -D warnings`/`cargo test`(単体91件+統合6件+schema_contract 3件の計100件)、`mise run docs:test`/`docs:check`/`prettier --check`がすべて成功した。
+- 段階Aとして技術的に実装可能な範囲はこれで完了した。残る`files.copy`の追跡済みファイル判定は実worktreeのGit状態が必要なため、意図的に段階Bへ持ち越す。ADR-0005は「Q11の未定義キーを決める」が未解決のため`proposed`のまま。
+
+## コミット: 段階A残課題の作業記録
+
+### 計画
+
+- [x] 未コミット差分が段階A残課題に関する作業記録だけであり、対応する製品変更が既存コミットに含まれることを確認する
+- [x] 文書検査、対象Markdownの整形検査、差分検査を実行する
+- [x] `tasks/lessons.md`と`tasks/todo.md`だけをステージし、ステージ済み差分を確認する
+- [x] 作業記録を1コミットにまとめ、commit、作業ツリー、push未実施を確認する
+
+### レビュー
+
+- 未コミット差分は`tasks/lessons.md`と`tasks/todo.md`だけで、並行実行設定値の意味検証、Herdrプラグイン仕様の実機調査・manifest作成、JSON Schema生成に対応する作業記録と教訓だった。製品コード・主文書・依存関係の変更は既存コミットへ分離済みであることを確認した。
+- `mise run docs:test`(3件)、`mise run docs:check`、対象2ファイルの`prettier --check`、`git diff --check`が成功した。独立レビューでもCritical・Warningはなく、作業記録として1コミットにまとめる判断が妥当と確認した。
+- 対象2ファイルだけを`docs: 段階A残課題の作業記録と教訓を追記する`としてコミットし、pushは行わない。
