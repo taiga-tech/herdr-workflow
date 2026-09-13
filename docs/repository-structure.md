@@ -3,7 +3,7 @@ id: DOC-STRUCTURE
 title: 'ディレクトリ構成'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-12'
+updated: '2026-09-14'
 ---
 
 # ディレクトリ構成
@@ -16,7 +16,7 @@ updated: '2026-09-12'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、および`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)と契約試験(`tests/workflow_contract.rs`)が存在する。`herdr-plugin.toml`、JSON Schema、意味検証(`config/validate.rs`)、layout変換(`plan/layout.rs`)、Herdr接続以降のmoduleはまだ存在しない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`サブコマンド(`src/cli.rs`)、および契約試験(`tests/workflow_contract.rs`)が存在する。`herdr-plugin.toml`、JSON Schema、Herdr接続以降のmoduleはまだ存在しない。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -37,13 +37,21 @@ herdr-workflow/
 ├── src/
 │   ├── main.rs                     エントリポイント
 │   ├── lib.rs                      公開APIの起点
+│   ├── cli.rs                      validate/planサブコマンド
 │   ├── config/
 │   │   ├── model.rs                WorkflowSpec等の設定型
-│   │   └── load.rs                 YAML読み込み(意味検証は含まない)
+│   │   ├── load.rs                 YAML読み込み
+│   │   ├── substitute.rs           値置換の検出・解決
+│   │   └── validate.rs             デシリアライズ後の意味検証
 │   ├── plan/
 │   │   ├── graph.rs                TaskIdのトポロジカルソートと循環検出
 │   │   ├── compile.rs              WorkflowSpec -> ExecutionPlanのcompile
-│   │   └── schedule.rs             依存判定を行う副作用なしの純粋関数群
+│   │   ├── compile/
+│   │   │   └── tests.rs            compileのunit test
+│   │   ├── schedule.rs             依存判定を行う副作用なしの純粋関数群
+│   │   ├── schedule/
+│   │   │   └── tests.rs            scheduleのunit test
+│   │   └── layout.rs               gridから二分割木への変換と検証
 │   └── state/
 │       └── models.rs               TaskState、AttemptResult等
 ├── tests/
@@ -109,11 +117,16 @@ herdr-workflow/
 │   ├── config/
 │   │   ├── model.rs
 │   │   ├── load.rs
+│   │   ├── substitute.rs           値置換の検出・解決
 │   │   └── validate.rs
 │   ├── plan/
 │   │   ├── graph.rs
 │   │   ├── compile.rs
+│   │   ├── compile/
+│   │   │   └── tests.rs
 │   │   ├── schedule.rs             依存判定を行う副作用なしの純粋関数群
+│   │   ├── schedule/
+│   │   │   └── tests.rs
 │   │   └── layout.rs
 │   ├── runtime/
 │   │   ├── coordinator.rs

@@ -3,7 +3,7 @@ id: PLAN-ROADMAP
 title: '実装段階'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-13'
 ---
 
 # 実装段階
@@ -35,6 +35,12 @@ updated: '2026-09-11'
 各段階は予定であり、完了扱いの項目はまだない。完了時は対象commit、対象OS、試験結果、未解消事項を追記する。段階Aの文書整理が済んだことと、計画器の実装完了を混同しない。
 
 承認、排他、所有権は、初期の型定義から設計へ反映する。段階Dまで危険な削除や無承認実行を許可するという意味ではない。公開判定ではCとDの受け入れ条件を満たす。
+
+### 段階Aの進行状況
+
+`WorkflowSpec`/`ExecutionPlan`/`TaskState`/`AttemptResult`の型定義、未知キー・重複キー・未定義変数の検出、循環依存と依存条件の検証、gridから二分割木への変換、`validate`/`plan`サブコマンドを実装した(`src/config/`・`src/plan/`・`src/state/`・`src/cli.rs`、`cargo test`87件で確認)。段階Aの出口条件のうち、これらに対応する不正設定の拒否は満たす。
+
+未解消のまま残した項目: `execution.maxConcurrentJobs`等の並行実行設定値の意味検証(現状は型の存在確認のみ)、`files.copy`の追跡済みファイル判定(実際のGit状態の確認が必要なため段階Bのworktree実装時に対応する)、JSON Schema生成、`herdr-plugin.toml`。段階Aを完了扱いにするのはこれらの解消後とする。
 
 ## 関連文書
 
