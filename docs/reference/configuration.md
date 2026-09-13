@@ -3,7 +3,7 @@ id: REF-CONFIGURATION
 title: '設定リファレンス'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-14'
 ---
 
 # 設定リファレンス
@@ -58,9 +58,9 @@ Run開始時に設定を解決し、ハッシュ付きの実行計画として�
 
 ## 仕様化の残件
 
-設定例は入力形式の提案であり、全キーの機械可読スキーマはまだない。resource lock、秘密値参照、シェルscript、継続health check、個別retryなど、本文に動作方針があり入力形式が未定義の項目は未決事項Q11で管理する。本文にないキーを推測して追加しない。
+設定例は入力形式の提案である。resource lock、秘密値参照、シェルscript、継続health check、個別retryなど、本文に動作方針があり入力形式が未定義の項目は未決事項Q11で管理する。本文にないキーを推測して追加しない。
 
-Rustの設定型を実装した後、JSON Schemaを型から生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。
+Rustの設定型(`WorkflowSpec`)から`herdr-workflow schema`コマンドでJSON Schema(`schema/workflow.schema.json`)を生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。この役割分担は`tests/schema_contract.rs`で固定している(構造的に正しいがDAGとして不正な設定がスキーマ検証を通ることを確認し、その意味検証は`plan::compile::compile`が担う)。
 
 ## 関連文書
 

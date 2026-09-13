@@ -16,7 +16,7 @@ updated: '2026-09-14'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`サブコマンド(`src/cli.rs`)、および契約試験(`tests/workflow_contract.rs`)が存在する。`herdr-plugin.toml`、JSON Schema、Herdr接続以降のmoduleはまだ存在しない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`)が存在する。段階Aで技術的に実装可能な範囲は完了しており、`files.copy`の追跡済みファイル判定とHerdr接続以降のmoduleが段階B以降の対象として残る。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -34,6 +34,9 @@ herdr-workflow/
 ├── skills-lock.json                外部スキルの導入元とハッシュ
 ├── Cargo.toml                      package定義と依存関係
 ├── Cargo.lock                      解決済み依存版の固定
+├── herdr-plugin.toml               validateアクションを登録するプラグインmanifest
+├── schema/
+│   └── workflow.schema.json        WorkflowSpecから生成したJSON Schema
 ├── src/
 │   ├── main.rs                     エントリポイント
 │   ├── lib.rs                      公開APIの起点
@@ -55,7 +58,8 @@ herdr-workflow/
 │   └── state/
 │       └── models.rs               TaskState、AttemptResult等
 ├── tests/
-│   └── workflow_contract.rs        設定例の実読み込みとcompileの契約試験
+│   ├── workflow_contract.rs        設定例の実読み込みとcompileの契約試験
+│   └── schema_contract.rs          生成スキーマの妥当性検証
 ├── .agents/skills/
 │   ├── herdr-workflow-docs/
 │   │   ├── SKILL.md                文書同期の判断と手順
@@ -107,9 +111,9 @@ herdr-workflow/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── mise.toml
-├── herdr-plugin.toml
+├── herdr-plugin.toml               実装済み。actionは今後planやHerdr接続に応じて追加する
 ├── schema/
-│   └── workflow.schema.json       Rust型から生成する予定
+│   └── workflow.schema.json       実装済み。`herdr-workflow schema`で再生成する
 ├── src/
 │   ├── main.rs
 │   ├── lib.rs

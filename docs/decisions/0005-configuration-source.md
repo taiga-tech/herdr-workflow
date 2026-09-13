@@ -3,7 +3,7 @@ id: ADR-0005
 title: 'ADR-0005：設定定義と生成スキーマの管理'
 status: proposed
 documentVersion: '0.2'
-updated: '2026-09-12'
+updated: '2026-09-14'
 ---
 
 # ADR-0005：設定定義と生成スキーマの管理
@@ -35,6 +35,12 @@ Rust型と生成スキーマが存在しない状態では、文書検査の合�
 ## YAMLライブラリの選定
 
 `serde_yaml`は開発が停止しアーカイブされているため、そのフォークである`serde_yaml_ng`をCargo.tomlの依存として採用した(`src/config/load.rs`)。未知キーの拒否は`WorkflowSpec`側の`deny_unknown_fields`で実装済みだが、重複キー検出、値置換、DAGの意味検証の一部、gridの検証は未実装のため、他の採用条件は引き続き未解決として扱い、この文書の状態は`proposed`のまま維持する。
+
+## JSON Schema生成の実装
+
+未知キー・重複キー検出、値置換、DAG(循環依存・依存条件)、gridの検証をすべて実装した後、`schemars`(Cargo.tomlの依存)で`WorkflowSpec`からJSON Schemaを生成する`herdr-workflow schema`コマンドを実装した(`src/cli.rs`)。生成物は`schema/workflow.schema.json`としてリポジトリに追跡する。`jsonschema`(dev依存)で`examples/workflow.yaml`が生成スキーマに対して妥当であることと、JSON Schemaが構造検証のみを担いDAGの意味検証を代替しないことを`tests/schema_contract.rs`で確認した。
+
+採用条件のうち「Q11の未定義キーを決める」は本実装と無関係に未解決のまま残っているため、この文書の状態は引き続き`proposed`とする。
 
 ## 関連文書
 
