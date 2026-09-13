@@ -1,19 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
+
 use crate::config::model::{
     DependencyCondition, DependsOn, OnDependencyLost, PaneConfig, PaneId, PaneView, TabConfig,
     TabId, TaskDef, TaskId, TaskLifecycle, WorkflowSpec,
 };
+use crate::config::validate::{self, ValidateError};
 use crate::plan::graph;
+use crate::plan::layout::{self, LayoutError, SplitTree};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PlannedTaskKind {
     Job,
     Service,
     Agent,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlannedTask {
     pub id: TaskId,
     pub kind: PlannedTaskKind,
@@ -21,26 +26,27 @@ pub struct PlannedTask {
     pub on_dependency_lost: Option<OnDependencyLost>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlannedPane {
     pub id: PaneId,
     /// StatusやShellのようにタスクを参照しないpaneは`None`。
     pub task: Option<TaskId>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlannedTab {
     pub id: TabId,
     pub panes: Vec<PlannedPane>,
+    pub layout: SplitTree,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlannedWorkspace {
     pub label: String,
     pub tabs: Vec<PlannedTab>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ExecutionPlan {
     pub tasks: BTreeMap<TaskId, PlannedTask>,
     pub topo_order: Vec<TaskId>,
@@ -76,9 +82,15 @@ pub enum CompileError {
         pane: PaneId,
         task: TaskId,
     },
+    #[error(transparent)]
+    Invalid(#[from] ValidateError),
+    #[error(transparent)]
+    Layout(#[from] LayoutError),
 }
 
 pub fn compile(spec: &WorkflowSpec) -> Result<ExecutionPlan, CompileError> {
+    validate::validate(spec)?;
+
     let mut tasks: BTreeMap<TaskId, PlannedTask> = BTreeMap::new();
     for (id, def) in &spec.tasks {
         let (kind, depends_on, on_dependency_lost) = match def {
@@ -204,9 +216,11 @@ fn plan_tab(
     for pane in &tab.panes {
         panes.push(plan_pane(tab, pane, tasks)?);
     }
+    let layout = layout::compile_layout(tab)?;
     Ok(PlannedTab {
         id: tab.id.clone(),
         panes,
+        layout,
     })
 }
 
@@ -396,5 +410,95 @@ mod tests {
                 task: TaskId::from("missing"),
             }
         );
+    }
+
+    #[test]
+    fn compile_rejects_spec_with_undefined_input_variable() {
+        let mut spec = example_spec();
+        spec.worktree.branch = "${inputs.missing}".to_string();
+        let err = compile(&spec).expect_err("undefined input variable should be rejected");
+        assert!(matches!(err, CompileError::Invalid(_)));
+    }
+
+    #[test]
+    fn compile_rejects_spec_with_unsliceable_layout() {
+        let mut spec = example_spec();
+        // A/B/C/D/Eの5枚から6枚のピンホイール配置へ変えてスライス不能にする。
+        spec.workspace.tabs[0].layout = crate::config::model::LayoutConfig::Grid {
+            columns: 3,
+            rows: 3,
+        };
+        spec.workspace.tabs[0].panes = vec![
+            crate::config::model::PaneConfig {
+                id: crate::config::model::PaneId("P1".to_string()),
+                label: "P1".to_string(),
+                view: PaneView::Shell,
+                placement: crate::config::model::Placement {
+                    column: 1,
+                    row: 1,
+                    col_span: 2,
+                    row_span: 1,
+                },
+            },
+            crate::config::model::PaneConfig {
+                id: crate::config::model::PaneId("P2".to_string()),
+                label: "P2".to_string(),
+                view: PaneView::Shell,
+                placement: crate::config::model::Placement {
+                    column: 3,
+                    row: 1,
+                    col_span: 1,
+                    row_span: 2,
+                },
+            },
+            crate::config::model::PaneConfig {
+                id: crate::config::model::PaneId("P3".to_string()),
+                label: "P3".to_string(),
+                view: PaneView::Shell,
+                placement: crate::config::model::Placement {
+                    column: 2,
+                    row: 3,
+                    col_span: 2,
+                    row_span: 1,
+                },
+            },
+            crate::config::model::PaneConfig {
+                id: crate::config::model::PaneId("P4".to_string()),
+                label: "P4".to_string(),
+                view: PaneView::Shell,
+                placement: crate::config::model::Placement {
+                    column: 1,
+                    row: 2,
+                    col_span: 1,
+                    row_span: 2,
+                },
+            },
+            crate::config::model::PaneConfig {
+                id: crate::config::model::PaneId("P5".to_string()),
+                label: "P5".to_string(),
+                view: PaneView::Shell,
+                placement: crate::config::model::Placement {
+                    column: 2,
+                    row: 2,
+                    col_span: 1,
+                    row_span: 1,
+                },
+            },
+        ];
+        let err = compile(&spec).expect_err("pinwheel layout should be rejected");
+        assert!(matches!(
+            err,
+            CompileError::Layout(LayoutError::NotSliceable { .. })
+        ));
+    }
+
+    #[test]
+    fn compiled_tab_includes_split_tree_for_the_example_workspace() {
+        let plan = compile(&example_spec()).expect("example workflow should compile");
+        assert_eq!(plan.workspace.tabs.len(), 1);
+        assert!(matches!(
+            plan.workspace.tabs[0].layout.root,
+            crate::plan::layout::SplitNode::Split { .. }
+        ));
     }
 }
