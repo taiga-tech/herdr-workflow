@@ -57,6 +57,9 @@ pub enum ValidateError {
         expected: InputType,
         value: String,
     },
+
+    #[error("execution.{field}: must be greater than zero when specified")]
+    ZeroExecutionLimit { field: &'static str },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +73,22 @@ pub fn validate(spec: &WorkflowSpec) -> Result<(), ValidateError> {
     validate_placeholders(spec)?;
     validate_unique_ids(spec)?;
     validate_copy_paths(spec)?;
+    validate_execution_limits(spec)?;
+    Ok(())
+}
+
+/// `None`は「制限なし」を意味し許容する。`u32`により負数は型レベルで排除済みなので、
+/// ここでは指定時に`0`(=並行実行を一切許可しない、DAGが進行不能になる)だけを拒否する。
+fn validate_execution_limits(spec: &WorkflowSpec) -> Result<(), ValidateError> {
+    for (value, field) in [
+        (spec.execution.max_concurrent_jobs, "maxConcurrentJobs"),
+        (spec.execution.max_live_services, "maxLiveServices"),
+        (spec.execution.max_live_agents, "maxLiveAgents"),
+    ] {
+        if value == Some(0) {
+            return Err(ValidateError::ZeroExecutionLimit { field });
+        }
+    }
     Ok(())
 }
 
@@ -379,5 +398,60 @@ mod tests {
                 second: 1
             }
         );
+    }
+
+    #[test]
+    fn zero_max_concurrent_jobs_is_rejected() {
+        let mut spec = example_spec();
+        spec.execution.max_concurrent_jobs = Some(0);
+        let err = validate(&spec).unwrap_err();
+        assert_eq!(
+            err,
+            ValidateError::ZeroExecutionLimit {
+                field: "maxConcurrentJobs"
+            }
+        );
+    }
+
+    #[test]
+    fn zero_max_live_services_is_rejected() {
+        let mut spec = example_spec();
+        spec.execution.max_live_services = Some(0);
+        let err = validate(&spec).unwrap_err();
+        assert_eq!(
+            err,
+            ValidateError::ZeroExecutionLimit {
+                field: "maxLiveServices"
+            }
+        );
+    }
+
+    #[test]
+    fn zero_max_live_agents_is_rejected() {
+        let mut spec = example_spec();
+        spec.execution.max_live_agents = Some(0);
+        let err = validate(&spec).unwrap_err();
+        assert_eq!(
+            err,
+            ValidateError::ZeroExecutionLimit {
+                field: "maxLiveAgents"
+            }
+        );
+    }
+
+    #[test]
+    fn none_execution_limits_are_accepted() {
+        let mut spec = example_spec();
+        spec.execution.max_concurrent_jobs = None;
+        spec.execution.max_live_services = None;
+        spec.execution.max_live_agents = None;
+        assert_eq!(validate(&spec), Ok(()));
+    }
+
+    #[test]
+    fn retries_zero_is_accepted() {
+        let mut spec = example_spec();
+        spec.execution.retries = 0;
+        assert_eq!(validate(&spec), Ok(()));
     }
 }

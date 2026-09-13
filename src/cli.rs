@@ -25,6 +25,9 @@ pub enum Command {
         inputs: Vec<(String, String)>,
         json: bool,
     },
+    Schema {
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -49,6 +52,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, CliError> {
     let mut config = PathBuf::from(DEFAULT_CONFIG_PATH);
     let mut json = false;
     let mut inputs = Vec::new();
+    let mut output: Option<PathBuf> = None;
 
     let mut iter = rest.iter();
     while let Some(arg) = iter.next() {
@@ -69,6 +73,12 @@ pub fn parse_args(args: &[String]) -> Result<Command, CliError> {
                     .ok_or_else(|| CliError::MalformedInput(value.clone()))?;
                 inputs.push((key.to_string(), val.to_string()));
             }
+            "--output" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| CliError::MissingFlagValue("--output".to_string()))?;
+                output = Some(PathBuf::from(value));
+            }
             other => return Err(CliError::UnknownFlag(other.to_string())),
         }
     }
@@ -80,6 +90,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, CliError> {
             inputs,
             json,
         }),
+        "schema" => Ok(Command::Schema { output }),
         other => Err(CliError::UnknownSubcommand(other.to_string())),
     }
 }
@@ -137,6 +148,7 @@ pub fn execute(command: &Command) -> (i32, String) {
             inputs,
             json,
         } => run_plan(config, inputs, *json),
+        Command::Schema { output } => run_schema(output.as_deref()),
     }
 }
 
@@ -236,6 +248,27 @@ fn run_plan(config: &PathBuf, provided_inputs: &[(String, String)], json: bool) 
         )
     };
     (0, output)
+}
+
+/// `WorkflowSpec`のJSON Schemaを生成する。`output`未指定ならstdoutへ出す文字列を返し、
+/// 指定時はファイルへ書き込んで完了メッセージを返す(ADR-0005: 型からスキーマを生成し、
+/// 生成物と型を別々に手作業で更新しない)。
+fn run_schema(output: Option<&std::path::Path>) -> (i32, String) {
+    let schema = schemars::schema_for!(WorkflowSpec);
+    let json = serde_json::to_string_pretty(&schema).expect("schema must serialize");
+    match output {
+        Some(path) => match std::fs::write(path, format!("{json}\n")) {
+            Ok(()) => (0, format!("スキーマを書き込みました: {}", path.display())),
+            Err(err) => (
+                2,
+                format!(
+                    "エラー(write): failed to write schema to {}: {err}",
+                    path.display()
+                ),
+            ),
+        },
+        None => (0, json),
+    }
 }
 
 fn error_output(json: bool, envelope: ErrorEnvelope) -> String {
@@ -381,5 +414,51 @@ mod tests {
         });
         assert_eq!(code, 2);
         assert!(output.contains("\"stage\":\"validate\""));
+    }
+
+    #[test]
+    fn parses_schema_with_output_flag() {
+        let args = vec![
+            "schema".to_string(),
+            "--output".to_string(),
+            "schema/workflow.schema.json".to_string(),
+        ];
+        let command = parse_args(&args).unwrap();
+        assert_eq!(
+            command,
+            Command::Schema {
+                output: Some(PathBuf::from("schema/workflow.schema.json")),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_schema_without_output_flag() {
+        let command = parse_args(&["schema".to_string()]).unwrap();
+        assert_eq!(command, Command::Schema { output: None });
+    }
+
+    #[test]
+    fn schema_command_prints_valid_json() {
+        let (code, output) = execute(&Command::Schema { output: None });
+        assert_eq!(code, 0);
+        let value: serde_json::Value = serde_json::from_str(&output).expect("valid JSON");
+        assert!(value.get("properties").is_some());
+    }
+
+    #[test]
+    fn schema_command_writes_to_output_file() {
+        let dir =
+            std::env::temp_dir().join(format!("herdr-workflow-schema-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("workflow.schema.json");
+        let (code, message) = execute(&Command::Schema {
+            output: Some(path.clone()),
+        });
+        assert_eq!(code, 0);
+        assert!(message.contains(&path.display().to_string()));
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&written).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

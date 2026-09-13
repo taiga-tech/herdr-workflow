@@ -247,3 +247,16 @@ fn compiled_tab_includes_split_tree_for_the_example_workspace() {
         crate::plan::layout::SplitNode::Split { .. }
     ));
 }
+
+#[test]
+fn compile_rejects_spec_with_zero_execution_limit() {
+    let mut spec = example_spec();
+    spec.execution.max_concurrent_jobs = Some(0);
+    let err = compile(&spec).expect_err("zero execution limit should be rejected");
+    assert!(matches!(
+        err,
+        CompileError::Invalid(crate::config::validate::ValidateError::ZeroExecutionLimit {
+            field: "maxConcurrentJobs"
+        })
+    ));
+}
