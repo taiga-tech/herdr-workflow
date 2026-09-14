@@ -3,7 +3,7 @@ id: GUIDE-DEVELOPMENT
 title: '開発環境と配布'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-12'
+updated: '2026-09-14'
 ---
 
 # 開発環境と配布
@@ -20,22 +20,22 @@ updated: '2026-09-12'
 
 以下は依存候補と担当範囲である。実装着手時に利用版、MSRV、license、security advisory、ビルド対象の整合を確認し、`Cargo.lock`へ固定する。この文書では未確認の「最新版番号」を記載しない。
 
-| 担当                          | 候補                                            |
-| ----------------------------- | ----------------------------------------------- |
-| 非同期処理、通信、プロセス    | `tokio`                                         |
-| キャンセルと入出力補助        | `tokio-util`                                    |
-| 設定型、JSON                  | `serde`、`serde_json`                           |
-| YAML                          | `serde-saphyr` [S6](../reference/sources.md#s6) |
-| CLI引数                       | `clap`                                          |
-| 依存グラフ、循環検出          | `petgraph` [S12](../reference/sources.md#s12)   |
-| HTTP readiness                | `reqwest`                                       |
-| ログパターン                  | `regex`                                         |
-| 構造化ログ                    | `tracing`、`tracing-subscriber`                 |
-| 型付きエラー、CLI最上位エラー | `thiserror`、`anyhow`                           |
-| 状態ストア                    | `rusqlite` [S13](../reference/sources.md#s13)   |
-| 端末画面                      | `ratatui`、`crossterm`                          |
-| OS別のプロセス制御            | Unix用APIとWindows用APIを別moduleに隔離         |
-| スキーマ出力                  | `schemars`等を検討。Rust型との二重管理を避ける  |
+| 担当                          | 候補                                                    |
+| ----------------------------- | ------------------------------------------------------- |
+| 非同期処理、通信、プロセス    | `tokio`                                                 |
+| キャンセルと入出力補助        | `tokio-util`                                            |
+| 設定型、JSON                  | `serde`、`serde_json`                                   |
+| YAML                          | `serde-saphyr` [S6](../reference/sources.md#s6)         |
+| CLI引数                       | `clap`                                                  |
+| 依存グラフ、循環検出          | `petgraph` [S12](../reference/sources.md#s12)           |
+| HTTP readiness                | `reqwest`                                               |
+| ログパターン                  | `regex`                                                 |
+| 構造化ログ                    | `tracing`、`tracing-subscriber`                         |
+| 型付きエラー、CLI最上位エラー | `thiserror`、`anyhow`                                   |
+| 状態ストア                    | `rusqlite` [S13](../reference/sources.md#s13)           |
+| 端末画面                      | `ratatui`、`crossterm`                                  |
+| OS別のプロセス制御            | Unix用APIとWindows用APIを別moduleに隔離                 |
+| スキーマ出力                  | `schemars`を採用。`herdr-workflow schema`コマンドで生成 |
 
 非同期処理の中でSQLiteの同期処理を長時間実行しない。専用の書き込み処理へ要求を送り、トランザクションを短く保つ。
 
@@ -69,7 +69,7 @@ Windowsネイティブは、Herdr側でもWindows向け機能の対応状況が�
 
 ## 検査
 
-現在はRust実装、`Cargo.toml`、プラグインmanifestが存在しない。上記のcargoコマンドはcrateを初期化した後、このリポジトリで実行する。
+上記のcargoコマンドはこのリポジトリで直接実行できる。実装状況は`docs/repository-structure.md`の「現在の状態」で確認する。
 
 文書の検査はリポジトリルートで実行する。
 

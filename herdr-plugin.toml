@@ -1,0 +1,17 @@
+id = "herdr-workflow"
+name = "Herdr Workflow"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Validate .herdr/workflow.yaml (syntax, DAG, grid) without running any task"
+# Windowsは受け入れ試験(T32)が未実施のため対象から外す。段階Eで検証後に追加する。
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release"]
+
+[[actions]]
+id = "validate"
+title = "Validate workflow config"
+description = "Check .herdr/workflow.yaml for syntax, DAG, and grid errors without running anything"
+contexts = ["workspace"]
+command = ["target/release/herdr-workflow", "validate"]
