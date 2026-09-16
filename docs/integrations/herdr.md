@@ -3,7 +3,7 @@ id: INT-HERDR
 title: 'Herdr連携と表示'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-09-16'
 ---
 
 # Herdr連携と表示
@@ -57,6 +57,8 @@ developer     running     ready      observed: idle
 対応下限は未決定。対象Herdr版、APIスキーマの取得結果、CLI/TUI双方のイベント発火、OS、試験日、結果を実装時に記録する。取得できない項目は未確認のまま残す。
 
 2026-09-14、インストール済みのHerdr v0.9.0(macOS)で`herdr api schema --json`を実行し、`herdr-plugin.toml`のマニフェスト形式(必須フィールド`id`/`name`/`version`/`min_herdr_version`、`[[actions]]`/`[[panes]]`/`[[startup]]`/`[[events]]`/`[[link_handlers]]`/`[[build]]`の各セクション)が存在することを確認した。フィールド構成の詳細は[CLIとHerdr action](../reference/cli.md)を参照する。この確認は対応下限の決定ではなく、マニフェスト形式が実在し公開ドキュメント([S1](../reference/sources.md#s1)[S2](../reference/sources.md#s2))と一致することの確認に限る。
+
+2026-09-16、稼働中のHerdr v0.9.0(Linux、client/serverともprotocol 22)について、既定設定、pane CLI、Socket APIスキーマを確認した。pane数を制限する公開設定、APIフィールド、配列の`maxItems`、上限超過エラーは確認できなかった。この結果はHerdr内部に実装上の限界が存在しないことを保証しないため、Herdr Workflow側でtabごとのpane数を32以下に制限し、上限変更時は対象Herdr版で実動作を測定する。
 
 任意Task一覧をネイティブサイドバーへ追加する機能は提供可能と断定しない。状態画面と集計メタデータの経路を先に検証する。
 

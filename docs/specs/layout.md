@@ -3,7 +3,7 @@ id: SPEC-LAYOUT
 title: 'gridとペイン配置'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-16'
 ---
 
 # gridとペイン配置
@@ -20,7 +20,7 @@ updated: '2026-09-11'
 
 ### 座標と範囲
 
-`column`と`row`は1始まり、`colSpan`と`rowSpan`は正の整数とする。列幅と行高は等分を初期仕様とし、比率指定は後続の拡張に分ける。
+`column`と`row`は1始まり、`colSpan`と`rowSpan`は正の整数とする。gridの`columns`と`rows`はそれぞれ1以上、プラグイン全体設定`limits.layout.maxGridDimension`以下とし、一つのtabのpane数は`limits.layout.maxPanesPerTab`以下とする。省略時および設定可能な安全上限はgrid各軸が64、pane数が32で、設定ではこれらを引き下げられるが引き上げられない。列幅と行高は等分を初期仕様とし、比率指定は後続の拡張に分ける。
 
 [設定例](../../examples/workflow.yaml)の配置は次のセル割り当てになる。
 
@@ -37,7 +37,7 @@ C D D D D E
 +---+---------------+---+
 ```
 
-検証では範囲外、重なり、未配置セル、参照切れを拒否する。空き領域を残す場合は、明示的にshell用のペインを配置する。
+検証ではgridの寸法上限超過、tabのpane数上限超過、範囲外、重なり、未配置セル、参照切れを拒否する。pane数上限は二次時間となる重複検査より先に適用する。空き領域を残す場合は、明示的にshell用のペインを配置する。
 
 ### 分割木への変換
 
@@ -57,4 +57,4 @@ Herdr側のレイアウトは二分割木で表現されるため、gridを内�
 
 ## 関連文書
 
-[設定例](../../examples/workflow.yaml) / [Herdr連携](../integrations/herdr.md) / [再開](recovery.md)
+[workflow設定例](../../examples/workflow.yaml) / [プラグイン全体設定](../reference/configuration.md) / [Herdr連携](../integrations/herdr.md) / [再開](recovery.md)

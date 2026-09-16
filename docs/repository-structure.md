@@ -3,7 +3,7 @@ id: DOC-STRUCTURE
 title: 'ディレクトリ構成'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-09-16'
 ---
 
 # ディレクトリ構成
@@ -16,7 +16,7 @@ updated: '2026-09-14'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`)が存在する。段階Aで技術的に実装可能な範囲は完了しており、`files.copy`の追跡済みファイル判定とHerdr接続以降のmoduleが段階B以降の対象として残る。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、workflow設定例とプラグイン全体設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、プラグイン全体設定の読み込み(`config/plugin.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`)が存在する。段階Aで技術的に実装可能な範囲は完了しており、`files.copy`の追跡済みファイル判定とHerdr接続以降のmoduleが段階B以降の対象として残る。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -44,6 +44,7 @@ herdr-workflow/
 │   ├── config/
 │   │   ├── model.rs                WorkflowSpec等の設定型
 │   │   ├── load.rs                 YAML読み込み
+│   │   ├── plugin.rs               プラグイン全体設定の読み込みと検証
 │   │   ├── substitute.rs           値置換の検出・解決
 │   │   └── validate.rs             デシリアライズ後の意味検証
 │   ├── plan/
@@ -90,7 +91,8 @@ herdr-workflow/
 │   ├── meta/                      元資料と現行文書の移行対応表
 │   └── manifest.json              文書IDとパスの一覧
 ├── examples/
-│   └── workflow.yaml              設定例の編集元
+│   ├── workflow.yaml              workflow設定例の編集元
+│   └── config.yaml                プラグイン全体設定例の編集元
 ├── archive/
 │   ├── README.md                  元資料の扱い
 │   ├── design-0.1.md              元の設計書、そのまま保存
@@ -121,6 +123,7 @@ herdr-workflow/
 │   ├── config/
 │   │   ├── model.rs
 │   │   ├── load.rs
+│   │   ├── plugin.rs               プラグイン全体設定の読み込みと検証
 │   │   ├── substitute.rs           値置換の検出・解決
 │   │   └── validate.rs
 │   ├── plan/

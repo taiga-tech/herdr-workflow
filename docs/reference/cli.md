@@ -3,7 +3,7 @@ id: REF-CLI
 title: 'CLIとHerdr action'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-09-16'
 ---
 
 # CLIとHerdr action
@@ -57,6 +57,10 @@ herdr-workflow stop RUN_ID
 
 `up`の受付成功は、初期化の成功を意味しない。`up`は受付記録とRun IDを返し、成否は`wait`、`status`、通知で取得する。`run --target`はserviceの存在によって待ち続けず、指定jobの結果で終了する。
 
+`validate`と`plan`はworkflow設定より先に`$HERDR_PLUGIN_CONFIG_DIR/config.yaml`を読み、[プラグイン全体設定](configuration.md)の上限を適用する。環境変数またはファイルがない場合は組み込み既定値を使う。存在するプラグイン全体設定が不正な場合は終了コード2と`plugin-config`段階のエラーを返し、workflow設定の検証へ進まない。`schema`は`WorkflowSpec`の生成だけを行うため、プラグイン全体設定を読み込まない。
+
+`plan`のハッシュには正規化したworkflow設定、解決済み入力、適用したプラグイン全体設定を含める。同じworkflowと入力でも、プラグイン全体設定が異なれば別のハッシュになる。
+
 機械向け出力は`--json`で提供し、ログや進捗文を混在させない。終了コードの案は、0が操作成功、2が設定不正、3が承認待ち、4が実行失敗、5が接続・互換性エラー、6が状態不明または照合待ち、130が利用者の中止とする。生の子プロセス終了コードは結果オブジェクトにも保存する。
 
 Herdr actionは`up / status / stop / validate / cleanup-review`を入口とし、実処理は同じCLIとCoordinatorへ集約する。選択式の操作は、manifestで宣言した端末画面を開いて入力を受け取る。
@@ -65,4 +69,4 @@ Herdr actionは`up / status / stop / validate / cleanup-review`を入口とし�
 
 ## 関連文書
 
-[運用手順](../guides/operations.md) / [resumeとretry](../specs/recovery.md) / [削除仕様](../specs/cleanup.md)
+[設定](configuration.md) / [運用手順](../guides/operations.md) / [resumeとretry](../specs/recovery.md) / [削除仕様](../specs/cleanup.md)

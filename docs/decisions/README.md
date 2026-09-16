@@ -3,7 +3,7 @@ id: ADR-INDEX
 title: '設計判断の記録'
 status: current
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-16'
 ---
 
 # 設計判断の記録
@@ -12,7 +12,7 @@ updated: '2026-09-11'
 
 ## 判断の一覧
 
-Rust採用だけを`accepted`とし、残りは元設計から取り出した`proposed`として記録する。利用者の承認を推定しない。ここには実装済みかどうかを記録するのではなく、何を採用したか・検討しているかを記録する。
+`accepted`は利用者が採用を明示した判断、`proposed`は元設計から取り出した未採用の案として記録する。利用者の承認を推定しない。ここには実装済みかどうかを記録するのではなく、何を採用したか・検討しているかを記録する。
 
 | ID                                                | 判断                          | 状態       |
 | ------------------------------------------------- | ----------------------------- | ---------- |
@@ -21,6 +21,7 @@ Rust採用だけを`accepted`とし、残りは元設計から取り出した`pr
 | [ADR-0003](0003-dependency-readiness.md)          | 依存条件とreadinessの分離     | `proposed` |
 | [ADR-0004](0004-owned-resource-reconciliation.md) | 所有権と照合による復旧        | `proposed` |
 | [ADR-0005](0005-configuration-source.md)          | 設定定義と生成スキーマの管理  | `proposed` |
+| [ADR-0006](0006-plugin-config.md)                 | 利用者固有のプラグイン全体設定 | `accepted` |
 
 ## 新しい判断の記録
 

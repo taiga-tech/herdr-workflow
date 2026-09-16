@@ -3,7 +3,7 @@ id: DOC-ARCHITECTURE
 title: 'アーキテクチャ'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-09-16'
 ---
 
 # アーキテクチャ
@@ -82,7 +82,7 @@ hookは環境変数からイベントと対象を受け取り、Coordinatorの�
 
 上記四型と四つの固定動作は`src/config/model.rs`・`src/plan/compile.rs`・`src/state/models.rs`・`src/plan/schedule.rs`の実装と`cargo test`の成功で確認できる。
 
-続けて、未知キー・重複キー・未定義変数の検出(`src/config/model.rs`・`src/config/validate.rs`)、`${inputs.x}`の値置換(`src/config/substitute.rs`。`${worktree.path}`等の実行時変数は値を解決せず予約名前空間として構文確認のみ行う)、gridから二分割木への変換と検証(`src/plan/layout.rs`)、並行実行設定値の意味検証、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)を実装した。HerdrAdapter接続はこの範囲に含めていない。
+続けて、未知キー・重複キー・未定義変数の検出(`src/config/model.rs`・`src/config/validate.rs`)、`${inputs.x}`の値置換(`src/config/substitute.rs`。`${worktree.path}`等の実行時変数は値を解決せず予約名前空間として構文確認のみ行う)、`$HERDR_PLUGIN_CONFIG_DIR/config.yaml`の読み込みと上限検証(`src/config/plugin.rs`)、bootstrap依存閉包とAgentペイン対応の検証、grid座標の整数overflow、grid寸法上限、tabごとのpane数上限を適用する二分割木への変換と検証(`src/plan/compile.rs`・`src/plan/layout.rs`)、並行実行設定値の意味検証、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)を実装した。HerdrAdapter接続はこの範囲に含めていない。
 
 `herdr-plugin.toml`(リポジトリルート)は実装済みの`validate`アクションだけを登録する。Herdr v0.9.0の実機で`herdr plugin link`・`action invoke`・`plugin log`を使い、設定不正時(`exit_code=2`)と妥当時(`exit_code=0`)の両方が正しく実行・記録されることを確認した(検証後`unlink`済み)。`plan`は`--input`が必須で引数なしの単純呼び出しでは機能しないため、actionとして登録していない(段階Cで対話的な`[[panes]]`を実装する際に検討する)。
 
