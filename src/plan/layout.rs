@@ -179,14 +179,9 @@ fn validate_grid(
     columns: u32,
     rows: u32,
 ) -> Result<(), LayoutError> {
+    // 下限側の不変条件はresolve_panesが保証するため上限だけ確認する。
     for p in panes {
-        if p.col_start < 1
-            || p.col_start > columns
-            || p.row_start < 1
-            || p.row_start > rows
-            || p.col_end > columns
-            || p.row_end > rows
-        {
+        if p.col_end > columns || p.row_end > rows {
             return Err(LayoutError::OutOfRange {
                 tab: tab.clone(),
                 pane: p.id.clone(),

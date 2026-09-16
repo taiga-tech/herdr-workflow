@@ -1,5 +1,25 @@
 # 作業計画
 
+## ブランチレビュー（2026-09-14）
+
+- 対象: `develop...HEAD`。設定・計画・CLIの不具合と回帰を確認し、製品コードは変更しない。
+- [x] 比較元、差分、関連仕様と教訓を確認する
+- [x] 設定検証・DAG・配置・CLIを分担してレビューする
+- [x] 既存テストと指摘候補の再現を確認する
+- [x] 根拠付きの指摘と検証範囲を報告する
+
+### レビュー結果
+
+- 未定義bootstrap targetとゼロspanでのpanic、初期化のstarted依存による進行不能、起動失敗Attemptによるstarted条件の誤成立、コピー先の表記差による重複検査漏れを再現した。
+- Rustテスト100件、rust:fmt、rust:clippy、docs:test（3件）、docs:checkが成功した。Herdr実機・実Agent起動は検査していない。
+- 製品コードは変更せず、レビュー記録のみを更新した。
+
+## PR #3レビュー対応（2026-09-16）
+
+- `condition_met`のStarted判定が`AttemptOutcome::LaunchFailed`でも成立していた不具合（上記「起動失敗Attemptによるstarted条件の誤成立」）を修正した(`src/plan/schedule.rs`)。回帰テストを`src/plan/schedule/tests.rs`に追加。
+- `compute_init_boundary`内の到達不能な`UnknownBootstrapTarget`分岐を削除した(`src/plan/compile.rs`)。bootstrap targetと依存先は呼び出し前に存在確認済みのため。
+- `validate_grid`の`col_start > columns` / `row_start > rows` / `col_start < 1` / `row_start < 1`チェックを、`resolve_panes`が保証する不変条件（col_start/row_start >= 1、col_end >= col_start、row_end >= row_start）により冗長と判断し、`col_end > columns` / `row_end > rows`のみへ簡略化した(`src/plan/layout.rs`)。
+
 ## 仕様
 
 - このリポジトリを、設計文書の配布物ではなく Herdr Workflow プラグイン本体の開発リポジトリとして扱えるようにする。

@@ -108,6 +108,46 @@ fn started_dependency_inside_bootstrap_does_not_deadlock_initial_schedule() {
     assert_eq!(runnable, BTreeSet::from([TaskId::from("toolchain")]));
 }
 
+#[test]
+fn started_condition_is_not_met_when_launch_failed() {
+    let mut runtime = TaskRuntimeState::default();
+    runtime.record_attempt_result(AttemptResult {
+        attempt_id: AttemptId(1),
+        launch_evidence: LaunchEvidence {
+            pid: None,
+            started_at: None,
+            command_summary: "mise install".to_string(),
+        },
+        outcome: AttemptOutcome::LaunchFailed("command not found".to_string()),
+        log_position: LogPosition {
+            byte_offset: 0,
+            line_number: 0,
+        },
+    });
+
+    assert!(!condition_met(DependencyCondition::Started, &runtime));
+}
+
+#[test]
+fn started_condition_is_met_once_an_attempt_actually_launched() {
+    let mut runtime = TaskRuntimeState::default();
+    runtime.record_attempt_result(AttemptResult {
+        attempt_id: AttemptId(1),
+        launch_evidence: LaunchEvidence {
+            pid: Some(1234),
+            started_at: None,
+            command_summary: "mise install".to_string(),
+        },
+        outcome: AttemptOutcome::Pending,
+        log_position: LogPosition {
+            byte_offset: 0,
+            line_number: 0,
+        },
+    });
+
+    assert!(condition_met(DependencyCondition::Started, &runtime));
+}
+
 // --- 2. serviceのready後にE2Eを実行する ------------------------------------
 
 #[test]

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::model::{DependencyCondition, TabId, TaskId};
 use crate::plan::compile::{ExecutionPlan, PlannedTab};
-use crate::state::models::{ReadinessState, TaskRuntimeState, TaskState};
+use crate::state::models::{AttemptOutcome, ReadinessState, TaskRuntimeState, TaskState};
 
 pub type TaskStates = BTreeMap<TaskId, TaskRuntimeState>;
 
@@ -19,7 +19,9 @@ fn condition_met(condition: DependencyCondition, dependency_state: &TaskRuntimeS
     match condition {
         DependencyCondition::Succeeded => dependency_state.state == TaskState::Succeeded,
         DependencyCondition::Ready => dependency_state.readiness == ReadinessState::Ready,
-        DependencyCondition::Started => dependency_state.current_attempt().is_some(),
+        DependencyCondition::Started => dependency_state
+            .current_attempt()
+            .is_some_and(|attempt| !matches!(attempt.outcome, AttemptOutcome::LaunchFailed(_))),
     }
 }
 

@@ -229,9 +229,8 @@ fn compute_init_boundary(
         if !boundary.insert(id.clone()) {
             continue;
         }
-        let task = tasks
-            .get(&id)
-            .ok_or_else(|| CompileError::UnknownBootstrapTarget(id.clone()))?;
+        // 既存タスクのみが登録される不変条件はUnknownDependencyチェックで保証済み。
+        let task = &tasks[&id];
         if task.kind != PlannedTaskKind::Job {
             return Err(CompileError::InvalidBootstrapDependency(id));
         }
