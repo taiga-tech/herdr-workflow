@@ -1,0 +1,6 @@
+version: 1
+
+limits:
+  layout:
+    maxGridDimension: 64
+    maxPanesPerTab: 32

@@ -9,6 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::config::model::{InputId, WorkflowSpec};
+use crate::config::plugin::{self, PluginConfig};
 use crate::config::{load, substitute};
 use crate::plan::compile;
 
@@ -121,6 +122,7 @@ struct ErrorOutcome {
 #[derive(Debug, Serialize)]
 struct HashInput<'a> {
     spec: &'a WorkflowSpec,
+    plugin_config: &'a PluginConfig,
     resolved_inputs: &'a substitute::ResolvedInputs,
 }
 
@@ -141,33 +143,71 @@ struct PlanReport {
 
 /// (exit_code, stdoutへ出す文字列) を返す純粋関数。プロセスには触れない。
 pub fn execute(command: &Command) -> (i32, String) {
+    execute_with_plugin_config(command, &PluginConfig::default())
+}
+
+pub fn execute_from_environment(command: &Command) -> (i32, String) {
+    if matches!(command, Command::Schema { .. }) {
+        return execute(command);
+    }
+    let plugin_config = match plugin::load_from_env() {
+        Ok(config) => config,
+        Err(err) => {
+            return (
+                2,
+                error_output(
+                    command_uses_json(command),
+                    ErrorEnvelope {
+                        stage: "plugin-config",
+                        message: err.to_string(),
+                    },
+                ),
+            );
+        }
+    };
+    execute_with_plugin_config(command, &plugin_config)
+}
+
+pub fn execute_with_plugin_config(
+    command: &Command,
+    plugin_config: &PluginConfig,
+) -> (i32, String) {
     match command {
-        Command::Validate { config, json } => run_validate(config, *json),
+        Command::Validate { config, json } => run_validate(config, *json, plugin_config),
         Command::Plan {
             config,
             inputs,
             json,
-        } => run_plan(config, inputs, *json),
+        } => run_plan(config, inputs, *json, plugin_config),
         Command::Schema { output } => run_schema(output.as_deref()),
+    }
+}
+
+fn command_uses_json(command: &Command) -> bool {
+    match command {
+        Command::Validate { json, .. } | Command::Plan { json, .. } => *json,
+        Command::Schema { .. } => false,
     }
 }
 
 fn load_and_compile(
     config: &PathBuf,
+    plugin_config: &PluginConfig,
 ) -> Result<(WorkflowSpec, compile::ExecutionPlan), ErrorEnvelope> {
     let spec = load::load_file(config).map_err(|err| ErrorEnvelope {
         stage: "load",
         message: err.to_string(),
     })?;
-    let plan = compile::compile(&spec).map_err(|err| ErrorEnvelope {
-        stage: "compile",
-        message: err.to_string(),
-    })?;
+    let plan =
+        compile::compile_with_plugin_config(&spec, plugin_config).map_err(|err| ErrorEnvelope {
+            stage: "compile",
+            message: err.to_string(),
+        })?;
     Ok((spec, plan))
 }
 
-fn run_validate(config: &PathBuf, json: bool) -> (i32, String) {
-    match load_and_compile(config) {
+fn run_validate(config: &PathBuf, json: bool, plugin_config: &PluginConfig) -> (i32, String) {
+    match load_and_compile(config, plugin_config) {
         Ok(_) => {
             let output = if json {
                 serde_json::to_string(&ValidateOutcome { ok: true }).expect("serializable")
@@ -180,8 +220,13 @@ fn run_validate(config: &PathBuf, json: bool) -> (i32, String) {
     }
 }
 
-fn run_plan(config: &PathBuf, provided_inputs: &[(String, String)], json: bool) -> (i32, String) {
-    let (spec, plan) = match load_and_compile(config) {
+fn run_plan(
+    config: &PathBuf,
+    provided_inputs: &[(String, String)],
+    json: bool,
+    plugin_config: &PluginConfig,
+) -> (i32, String) {
+    let (spec, plan) = match load_and_compile(config, plugin_config) {
         Ok(pair) => pair,
         Err(envelope) => return (2, error_output(json, envelope)),
     };
@@ -223,7 +268,7 @@ fn run_plan(config: &PathBuf, provided_inputs: &[(String, String)], json: bool) 
         }
     };
 
-    let hash = plan_hash(&spec, &resolved);
+    let hash = plan_hash(&spec, plugin_config, &resolved);
     let report = PlanReport {
         hash,
         bootstrap_targets: plan.bootstrap_targets.clone(),
@@ -283,9 +328,14 @@ fn error_output(json: bool, envelope: ErrorEnvelope) -> String {
     }
 }
 
-fn plan_hash(spec: &WorkflowSpec, resolved: &substitute::ResolvedInputs) -> String {
+fn plan_hash(
+    spec: &WorkflowSpec,
+    plugin_config: &PluginConfig,
+    resolved: &substitute::ResolvedInputs,
+) -> String {
     let hash_input = HashInput {
         spec,
+        plugin_config,
         resolved_inputs: resolved,
     };
     let canonical = serde_json::to_string(&hash_input).expect("WorkflowSpec must serialize");
@@ -414,6 +464,65 @@ mod tests {
         });
         assert_eq!(code, 2);
         assert!(output.contains("\"stage\":\"validate\""));
+    }
+
+    #[test]
+    fn validate_command_enforces_plugin_grid_limit() {
+        let plugin_config =
+            plugin::load_str("version: 1\nlimits:\n  layout:\n    maxGridDimension: 5\n")
+                .expect("plugin config should load");
+        let (code, output) = execute_with_plugin_config(
+            &Command::Validate {
+                config: example_config(),
+                json: true,
+            },
+            &plugin_config,
+        );
+        assert_eq!(code, 2);
+        assert!(output.contains("\"stage\":\"compile\""));
+        assert!(output.contains("must not exceed 5"));
+    }
+
+    #[test]
+    fn validate_command_enforces_plugin_pane_limit() {
+        let plugin_config =
+            plugin::load_str("version: 1\nlimits:\n  layout:\n    maxPanesPerTab: 4\n")
+                .expect("plugin config should load");
+        let (code, output) = execute_with_plugin_config(
+            &Command::Validate {
+                config: example_config(),
+                json: true,
+            },
+            &plugin_config,
+        );
+        assert_eq!(code, 2);
+        assert!(output.contains("\"stage\":\"compile\""));
+        assert!(output.contains("must not contain more than 4 panes"));
+    }
+
+    #[test]
+    fn plan_hash_includes_plugin_config() {
+        let command = Command::Plan {
+            config: example_config(),
+            inputs: vec![("branch".to_string(), "feature/x".to_string())],
+            json: true,
+        };
+        let default_config = PluginConfig::default();
+        let stricter_config =
+            plugin::load_str("version: 1\nlimits:\n  layout:\n    maxGridDimension: 32\n")
+                .expect("plugin config should load");
+
+        let (default_code, default_output) = execute_with_plugin_config(&command, &default_config);
+        let (stricter_code, stricter_output) =
+            execute_with_plugin_config(&command, &stricter_config);
+
+        assert_eq!(default_code, 0);
+        assert_eq!(stricter_code, 0);
+        let default_json: serde_json::Value =
+            serde_json::from_str(&default_output).expect("default output is JSON");
+        let stricter_json: serde_json::Value =
+            serde_json::from_str(&stricter_output).expect("stricter output is JSON");
+        assert_ne!(default_json["plan"]["hash"], stricter_json["plan"]["hash"]);
     }
 
     #[test]

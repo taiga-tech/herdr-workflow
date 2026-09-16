@@ -4,6 +4,7 @@
 use serde::Serialize;
 
 use crate::config::model::{LayoutConfig, PaneId, TabConfig, TabId};
+use crate::config::plugin::{DEFAULT_MAX_GRID_DIMENSION, DEFAULT_MAX_PANES_PER_TAB};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +35,19 @@ pub struct SplitTree {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum LayoutError {
+    #[error("tab {tab:?} grid dimensions must be positive, got {columns}x{rows}")]
+    InvalidGridSize { tab: TabId, columns: u32, rows: u32 },
+    #[error(
+        "tab {tab:?} grid dimensions must not exceed {max} columns or rows, got {columns}x{rows}"
+    )]
+    GridTooLarge {
+        tab: TabId,
+        columns: u32,
+        rows: u32,
+        max: u32,
+    },
+    #[error("tab {tab:?} must not contain more than {max} panes, found {count}")]
+    TooManyPanes { tab: TabId, count: usize, max: u32 },
     #[error("pane {pane:?} in tab {tab:?} is out of the {columns}x{rows} grid")]
     OutOfRange {
         tab: TabId,
@@ -83,15 +97,52 @@ struct Region {
     row_end: u32,
 }
 
-fn resolve_panes(tab: &TabConfig) -> Vec<ResolvedPane<'_>> {
+fn resolve_panes(tab: &TabConfig) -> Result<Vec<ResolvedPane<'_>>, LayoutError> {
+    let LayoutConfig::Grid { columns, rows } = &tab.layout;
+    let (columns, rows) = (*columns, *rows);
     tab.panes
         .iter()
-        .map(|pane| ResolvedPane {
-            id: &pane.id,
-            col_start: pane.placement.column,
-            col_end: pane.placement.column + pane.placement.col_span - 1,
-            row_start: pane.placement.row,
-            row_end: pane.placement.row + pane.placement.row_span - 1,
+        .map(|pane| {
+            let placement = pane.placement;
+            if placement.column == 0
+                || placement.row == 0
+                || placement.col_span == 0
+                || placement.row_span == 0
+            {
+                return Err(LayoutError::OutOfRange {
+                    tab: tab.id.clone(),
+                    pane: pane.id.clone(),
+                    columns,
+                    rows,
+                });
+            }
+
+            let col_end = placement
+                .column
+                .checked_add(placement.col_span - 1)
+                .ok_or_else(|| LayoutError::OutOfRange {
+                    tab: tab.id.clone(),
+                    pane: pane.id.clone(),
+                    columns,
+                    rows,
+                })?;
+            let row_end = placement
+                .row
+                .checked_add(placement.row_span - 1)
+                .ok_or_else(|| LayoutError::OutOfRange {
+                    tab: tab.id.clone(),
+                    pane: pane.id.clone(),
+                    columns,
+                    rows,
+                })?;
+
+            Ok(ResolvedPane {
+                id: &pane.id,
+                col_start: placement.column,
+                col_end,
+                row_start: placement.row,
+                row_end,
+            })
         })
         .collect()
 }
@@ -129,7 +180,13 @@ fn validate_grid(
     rows: u32,
 ) -> Result<(), LayoutError> {
     for p in panes {
-        if p.col_start < 1 || p.row_start < 1 || p.col_end > columns || p.row_end > rows {
+        if p.col_start < 1
+            || p.col_start > columns
+            || p.row_start < 1
+            || p.row_start > rows
+            || p.col_end > columns
+            || p.row_end > rows
+        {
             return Err(LayoutError::OutOfRange {
                 tab: tab.clone(),
                 pane: p.id.clone(),
@@ -228,8 +285,38 @@ fn split_region(
 }
 
 pub fn compile_layout(tab: &TabConfig) -> Result<SplitTree, LayoutError> {
+    compile_layout_with_limits(tab, DEFAULT_MAX_GRID_DIMENSION, DEFAULT_MAX_PANES_PER_TAB)
+}
+
+pub(crate) fn compile_layout_with_limits(
+    tab: &TabConfig,
+    max_grid_dimension: u32,
+    max_panes_per_tab: u32,
+) -> Result<SplitTree, LayoutError> {
     let LayoutConfig::Grid { columns, rows } = &tab.layout;
-    let panes = resolve_panes(tab);
+    if *columns == 0 || *rows == 0 {
+        return Err(LayoutError::InvalidGridSize {
+            tab: tab.id.clone(),
+            columns: *columns,
+            rows: *rows,
+        });
+    }
+    if *columns > max_grid_dimension || *rows > max_grid_dimension {
+        return Err(LayoutError::GridTooLarge {
+            tab: tab.id.clone(),
+            columns: *columns,
+            rows: *rows,
+            max: max_grid_dimension,
+        });
+    }
+    if u32::try_from(tab.panes.len()).map_or(true, |count| count > max_panes_per_tab) {
+        return Err(LayoutError::TooManyPanes {
+            tab: tab.id.clone(),
+            count: tab.panes.len(),
+            max: max_panes_per_tab,
+        });
+    }
+    let panes = resolve_panes(tab)?;
     validate_grid(&tab.id, &panes, *columns, *rows)?;
     let region = Region {
         col_start: 1,
@@ -323,6 +410,109 @@ mod tests {
     #[test]
     fn placement_out_of_row_range_is_rejected() {
         let tab = tab_with(1, 1, vec![pane("A", 1, 1, 1, 2)]);
+        let err = compile_layout(&tab).unwrap_err();
+        assert!(matches!(err, LayoutError::OutOfRange { .. }));
+    }
+
+    #[test]
+    fn zero_grid_dimension_is_rejected() {
+        let tab = tab_with(0, 1, vec![]);
+        let err = compile_layout(&tab).unwrap_err();
+        assert_eq!(
+            err,
+            LayoutError::InvalidGridSize {
+                tab: TabId::from("t"),
+                columns: 0,
+                rows: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn oversized_grid_column_count_is_rejected() {
+        let tab = tab_with(DEFAULT_MAX_GRID_DIMENSION + 1, 1, vec![]);
+        let err = compile_layout(&tab).unwrap_err();
+        assert_eq!(
+            err,
+            LayoutError::GridTooLarge {
+                tab: TabId::from("t"),
+                columns: DEFAULT_MAX_GRID_DIMENSION + 1,
+                rows: 1,
+                max: DEFAULT_MAX_GRID_DIMENSION,
+            }
+        );
+    }
+
+    #[test]
+    fn oversized_grid_row_count_is_rejected() {
+        let tab = tab_with(1, DEFAULT_MAX_GRID_DIMENSION + 1, vec![]);
+        let err = compile_layout(&tab).unwrap_err();
+        assert!(matches!(err, LayoutError::GridTooLarge { .. }));
+    }
+
+    #[test]
+    fn maximum_grid_dimensions_are_accepted() {
+        let tab = tab_with(
+            DEFAULT_MAX_GRID_DIMENSION,
+            DEFAULT_MAX_GRID_DIMENSION,
+            vec![pane(
+                "A",
+                1,
+                1,
+                DEFAULT_MAX_GRID_DIMENSION,
+                DEFAULT_MAX_GRID_DIMENSION,
+            )],
+        );
+        let tree = compile_layout(&tab).expect("maximum grid dimensions should be valid");
+        assert_eq!(
+            tree.root,
+            SplitNode::Leaf {
+                pane: PaneId("A".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn configured_grid_limit_is_enforced() {
+        let tab = tab_with(5, 1, vec![pane("A", 1, 1, 5, 1)]);
+        let err = compile_layout_with_limits(&tab, 4, DEFAULT_MAX_PANES_PER_TAB)
+            .expect_err("configured limit must apply");
+        assert_eq!(
+            err,
+            LayoutError::GridTooLarge {
+                tab: TabId::from("t"),
+                columns: 5,
+                rows: 1,
+                max: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn configured_pane_limit_is_enforced_before_layout_validation() {
+        let tab = tab_with(2, 1, vec![pane("A", 1, 1, 1, 1), pane("B", 2, 1, 1, 1)]);
+        let err = compile_layout_with_limits(&tab, DEFAULT_MAX_GRID_DIMENSION, 1)
+            .expect_err("configured pane limit must apply");
+        assert_eq!(
+            err,
+            LayoutError::TooManyPanes {
+                tab: TabId::from("t"),
+                count: 2,
+                max: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn zero_span_is_rejected_without_panicking() {
+        let tab = tab_with(1, 1, vec![pane("A", 1, 1, 0, 1)]);
+        let err = compile_layout(&tab).unwrap_err();
+        assert!(matches!(err, LayoutError::OutOfRange { .. }));
+    }
+
+    #[test]
+    fn overflowing_placement_is_rejected_without_panicking() {
+        let tab = tab_with(1, 1, vec![pane("A", u32::MAX, 1, 2, 1)]);
         let err = compile_layout(&tab).unwrap_err();
         assert!(matches!(err, LayoutError::OutOfRange { .. }));
     }

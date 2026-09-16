@@ -142,6 +142,52 @@ fn bootstrap_target_must_be_a_job() {
 }
 
 #[test]
+fn unknown_bootstrap_target_is_rejected_without_panicking() {
+    let mut spec = example_spec();
+    spec.bootstrap.targets = vec![TaskId::from("missing")];
+    let err = compile(&spec).expect_err("unknown bootstrap target should be rejected");
+    assert_eq!(
+        err,
+        CompileError::UnknownBootstrapTarget(TaskId::from("missing"))
+    );
+}
+
+#[test]
+fn started_job_dependency_is_included_in_init_boundary() {
+    let mut spec = example_spec();
+    if let Some(TaskDef::Command { depends_on, .. }) = spec.tasks.get_mut(&TaskId::from("generate"))
+    {
+        depends_on[0].condition = DependencyCondition::Started;
+    }
+    let plan = compile(&spec).expect("job bootstrap dependency should compile");
+    let expected: BTreeSet<TaskId> = ["toolchain", "dependencies", "generate"]
+        .into_iter()
+        .map(TaskId::from)
+        .collect();
+    assert_eq!(plan.init_boundary, expected);
+}
+
+#[test]
+fn service_in_bootstrap_dependency_closure_is_rejected() {
+    let mut spec = example_spec();
+    if let Some(TaskDef::Command { depends_on, .. }) = spec.tasks.get_mut(&TaskId::from("server")) {
+        depends_on.clear();
+    }
+    if let Some(TaskDef::Command { depends_on, .. }) = spec.tasks.get_mut(&TaskId::from("generate"))
+    {
+        depends_on[0] = DependsOn {
+            task: TaskId::from("server"),
+            condition: DependencyCondition::Started,
+        };
+    }
+    let err = compile(&spec).expect_err("service bootstrap dependency should be rejected");
+    assert_eq!(
+        err,
+        CompileError::InvalidBootstrapDependency(TaskId::from("server"))
+    );
+}
+
+#[test]
 fn pane_referencing_unknown_task_is_rejected() {
     let mut spec = example_spec();
     spec.workspace.tabs[0].panes[0].view = PaneView::Logs {
@@ -154,6 +200,53 @@ fn pane_referencing_unknown_task_is_rejected() {
             tab: TabId::from("development"),
             pane: crate::config::model::PaneId("A".to_string()),
             task: TaskId::from("missing"),
+        }
+    );
+}
+
+#[test]
+fn agent_pane_referencing_command_task_is_rejected() {
+    let mut spec = example_spec();
+    spec.workspace.tabs[0].panes[1].view = PaneView::Agent {
+        task: TaskId::from("server"),
+    };
+    let err = compile(&spec).expect_err("agent pane must reference an agent task");
+    assert_eq!(
+        err,
+        CompileError::InvalidAgentPaneTask {
+            tab: TabId::from("development"),
+            pane: crate::config::model::PaneId("B".to_string()),
+            task: TaskId::from("server"),
+        }
+    );
+}
+
+#[test]
+fn agent_task_without_agent_pane_is_rejected() {
+    let mut spec = example_spec();
+    spec.workspace.tabs[0].panes[1].view = PaneView::Shell;
+    let err = compile(&spec).expect_err("agent task must have one agent pane");
+    assert_eq!(
+        err,
+        CompileError::InvalidAgentPaneCount {
+            task: TaskId::from("developer"),
+            count: 0,
+        }
+    );
+}
+
+#[test]
+fn agent_task_with_multiple_agent_panes_is_rejected() {
+    let mut spec = example_spec();
+    spec.workspace.tabs[0].panes[0].view = PaneView::Agent {
+        task: TaskId::from("developer"),
+    };
+    let err = compile(&spec).expect_err("agent task must not have multiple agent panes");
+    assert_eq!(
+        err,
+        CompileError::InvalidAgentPaneCount {
+            task: TaskId::from("developer"),
+            count: 2,
         }
     );
 }
@@ -178,7 +271,9 @@ fn compile_rejects_spec_with_unsliceable_layout() {
         crate::config::model::PaneConfig {
             id: crate::config::model::PaneId("P1".to_string()),
             label: "P1".to_string(),
-            view: PaneView::Shell,
+            view: PaneView::Agent {
+                task: TaskId::from("developer"),
+            },
             placement: crate::config::model::Placement {
                 column: 1,
                 row: 1,

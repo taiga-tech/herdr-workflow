@@ -6,6 +6,7 @@ use crate::config::model::{
     DependencyCondition, DependsOn, OnDependencyLost, PaneConfig, PaneId, PaneView, TabConfig,
     TabId, TaskDef, TaskId, TaskLifecycle, WorkflowSpec,
 };
+use crate::config::plugin::PluginConfig;
 use crate::config::validate::{self, ValidateError};
 use crate::plan::graph;
 use crate::plan::layout::{self, LayoutError, SplitTree};
@@ -76,12 +77,24 @@ pub enum CompileError {
     },
     #[error("bootstrap target {0:?} must be a job-lifecycle command task")]
     InvalidBootstrapTarget(TaskId),
+    #[error("bootstrap target {0:?} does not exist")]
+    UnknownBootstrapTarget(TaskId),
+    #[error("bootstrap dependency {0:?} must be a job-lifecycle command task")]
+    InvalidBootstrapDependency(TaskId),
     #[error("pane {pane:?} in tab {tab:?} references unknown task {task:?}")]
     UnknownPaneTask {
         tab: TabId,
         pane: PaneId,
         task: TaskId,
     },
+    #[error("agent pane {pane:?} in tab {tab:?} references non-agent task {task:?}")]
+    InvalidAgentPaneTask {
+        tab: TabId,
+        pane: PaneId,
+        task: TaskId,
+    },
+    #[error("agent task {task:?} must have exactly one agent pane, found {count}")]
+    InvalidAgentPaneCount { task: TaskId, count: usize },
     #[error(transparent)]
     Invalid(#[from] ValidateError),
     #[error(transparent)]
@@ -89,6 +102,13 @@ pub enum CompileError {
 }
 
 pub fn compile(spec: &WorkflowSpec) -> Result<ExecutionPlan, CompileError> {
+    compile_with_plugin_config(spec, &PluginConfig::default())
+}
+
+pub fn compile_with_plugin_config(
+    spec: &WorkflowSpec,
+    plugin_config: &PluginConfig,
+) -> Result<ExecutionPlan, CompileError> {
     validate::validate(spec)?;
 
     let mut tasks: BTreeMap<TaskId, PlannedTask> = BTreeMap::new();
@@ -165,16 +185,26 @@ pub fn compile(spec: &WorkflowSpec) -> Result<ExecutionPlan, CompileError> {
 
     let bootstrap_targets: BTreeSet<TaskId> = spec.bootstrap.targets.iter().cloned().collect();
     for target in &bootstrap_targets {
-        if tasks[target].kind != PlannedTaskKind::Job {
+        let Some(task) = tasks.get(target) else {
+            return Err(CompileError::UnknownBootstrapTarget(target.clone()));
+        };
+        if task.kind != PlannedTaskKind::Job {
             return Err(CompileError::InvalidBootstrapTarget(target.clone()));
         }
     }
 
-    let init_boundary = compute_init_boundary(&tasks, &bootstrap_targets);
+    let init_boundary = compute_init_boundary(&tasks, &bootstrap_targets)?;
+
+    validate_agent_panes(&spec.workspace.tabs, &tasks)?;
 
     let mut planned_tabs = Vec::with_capacity(spec.workspace.tabs.len());
     for tab in &spec.workspace.tabs {
-        planned_tabs.push(plan_tab(tab, &tasks)?);
+        planned_tabs.push(plan_tab(
+            tab,
+            &tasks,
+            plugin_config.max_grid_dimension(),
+            plugin_config.max_panes_per_tab(),
+        )?);
     }
 
     Ok(ExecutionPlan {
@@ -192,31 +222,80 @@ pub fn compile(spec: &WorkflowSpec) -> Result<ExecutionPlan, CompileError> {
 fn compute_init_boundary(
     tasks: &BTreeMap<TaskId, PlannedTask>,
     bootstrap_targets: &BTreeSet<TaskId>,
-) -> BTreeSet<TaskId> {
+) -> Result<BTreeSet<TaskId>, CompileError> {
     let mut boundary: BTreeSet<TaskId> = BTreeSet::new();
     let mut queue: Vec<TaskId> = bootstrap_targets.iter().cloned().collect();
     while let Some(id) = queue.pop() {
         if !boundary.insert(id.clone()) {
             continue;
         }
-        for dependency in &tasks[&id].depends_on {
-            if dependency.condition == DependencyCondition::Succeeded {
-                queue.push(dependency.task.clone());
-            }
+        let task = tasks
+            .get(&id)
+            .ok_or_else(|| CompileError::UnknownBootstrapTarget(id.clone()))?;
+        if task.kind != PlannedTaskKind::Job {
+            return Err(CompileError::InvalidBootstrapDependency(id));
+        }
+        for dependency in &task.depends_on {
+            queue.push(dependency.task.clone());
         }
     }
-    boundary
+    Ok(boundary)
+}
+
+fn validate_agent_panes(
+    tabs: &[TabConfig],
+    tasks: &BTreeMap<TaskId, PlannedTask>,
+) -> Result<(), CompileError> {
+    let mut pane_counts: BTreeMap<TaskId, usize> = BTreeMap::new();
+    for tab in tabs {
+        for pane in &tab.panes {
+            let PaneView::Agent { task } = &pane.view else {
+                continue;
+            };
+            let Some(planned_task) = tasks.get(task) else {
+                return Err(CompileError::UnknownPaneTask {
+                    tab: tab.id.clone(),
+                    pane: pane.id.clone(),
+                    task: task.clone(),
+                });
+            };
+            if planned_task.kind != PlannedTaskKind::Agent {
+                return Err(CompileError::InvalidAgentPaneTask {
+                    tab: tab.id.clone(),
+                    pane: pane.id.clone(),
+                    task: task.clone(),
+                });
+            }
+            *pane_counts.entry(task.clone()).or_default() += 1;
+        }
+    }
+
+    for task in tasks
+        .values()
+        .filter(|task| task.kind == PlannedTaskKind::Agent)
+    {
+        let count = pane_counts.get(&task.id).copied().unwrap_or_default();
+        if count != 1 {
+            return Err(CompileError::InvalidAgentPaneCount {
+                task: task.id.clone(),
+                count,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn plan_tab(
     tab: &TabConfig,
     tasks: &BTreeMap<TaskId, PlannedTask>,
+    max_grid_dimension: u32,
+    max_panes_per_tab: u32,
 ) -> Result<PlannedTab, CompileError> {
     let mut panes = Vec::with_capacity(tab.panes.len());
     for pane in &tab.panes {
         panes.push(plan_pane(tab, pane, tasks)?);
     }
-    let layout = layout::compile_layout(tab)?;
+    let layout = layout::compile_layout_with_limits(tab, max_grid_dimension, max_panes_per_tab)?;
     Ok(PlannedTab {
         id: tab.id.clone(),
         panes,

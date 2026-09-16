@@ -92,6 +92,22 @@ fn blanket_block_holds_even_without_direct_dependency_chain() {
     assert!(!runnable.contains(&TaskId::from("server")));
 }
 
+#[test]
+fn started_dependency_inside_bootstrap_does_not_deadlock_initial_schedule() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workflow.yaml");
+    let mut spec = load::load_file(path).expect("example config should load");
+    if let Some(crate::config::model::TaskDef::Command { depends_on, .. }) =
+        spec.tasks.get_mut(&TaskId::from("generate"))
+    {
+        depends_on[0].condition = DependencyCondition::Started;
+    }
+    let plan = compile::compile(&spec).expect("started job dependency should compile");
+
+    let runnable = runnable_tasks(&plan, &TaskStates::new());
+
+    assert_eq!(runnable, BTreeSet::from([TaskId::from("toolchain")]));
+}
+
 // --- 2. serviceのready後にE2Eを実行する ------------------------------------
 
 #[test]
