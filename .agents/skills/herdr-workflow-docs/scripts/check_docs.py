@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[4]
+CURRENT_ACCEPTANCE_TEST_MAX = 33
+MIGRATION_ACCEPTANCE_TEST_MAX = 32
 
 
 def read_json(path: Path) -> dict:
@@ -187,9 +189,16 @@ def check(check_migration: bool = False) -> dict:
 
     current = (ROOT/'docs/testing/acceptance.md').read_text(encoding='utf-8')
     new_rows = acceptance_rows(current)
-    expected_tests = {f'T{i:02d}' for i in range(1,33)}
-    if not expected_tests.issubset(new_rows):
-        errors.append('An acceptance test ID is missing')
+    expected_tests = {
+        f'T{i:02d}' for i in range(1, CURRENT_ACCEPTANCE_TEST_MAX + 1)
+    }
+    actual_tests = set(new_rows)
+    missing_tests = expected_tests - actual_tests
+    unexpected_tests = actual_tests - expected_tests
+    if missing_tests:
+        errors.append(f'An acceptance test ID is missing: {sorted(missing_tests)}')
+    if unexpected_tests:
+        errors.append(f'An unexpected acceptance test ID exists: {sorted(unexpected_tests)}')
     for test in expected_tests:
         if test.lower() not in anchors.get('docs/testing/acceptance.md',set()):
             errors.append(f'Acceptance test has no stable anchor: {test}')
@@ -197,7 +206,7 @@ def check(check_migration: bool = False) -> dict:
     for test in expected_tests:
         if f'#{test.lower()}' not in features_text:
             errors.append(f'Acceptance test is not linked from a feature: {test}')
-    counts['acceptanceTestIds'] = len(expected_tests & set(new_rows))
+    counts['acceptanceTestIds'] = len(expected_tests & actual_tests)
     counts['featureIds'] = len([a for a in anchors.get('docs/features.md',set()) if re.fullmatch(r'f\d{2}',a)])
     counts['decisionRecords'] = len([r for r in records if re.fullmatch(r'ADR-\d{4}',r['id'])])
     counts['openQuestionIds'] = len([a for a in anchors.get('docs/planning/open-questions.md',set()) if re.fullmatch(r'q\d{2}',a)])
@@ -226,12 +235,15 @@ def check(check_migration: bool = False) -> dict:
 
         original = (ROOT/'archive/design-0.1.md').read_text(encoding='utf-8')
         old_rows = acceptance_rows(original)
-        if set(old_rows) != expected_tests:
+        migration_tests = {
+            f'T{i:02d}' for i in range(1, MIGRATION_ACCEPTANCE_TEST_MAX + 1)
+        }
+        if set(old_rows) != migration_tests:
             errors.append('Unexpected source acceptance test IDs')
-        for test in sorted(expected_tests & set(new_rows)):
+        for test in sorted(migration_tests & set(new_rows)):
             if new_rows[test] != old_rows[test]:
                 errors.append(f'Acceptance criterion differs from source: {test}; record an intentional migration change before updating the preservation check')
-        counts['unchangedSourceAcceptanceCriteria'] = sum(new_rows.get(t) == old_rows[t] for t in expected_tests)
+        counts['unchangedSourceAcceptanceCriteria'] = sum(new_rows.get(t) == old_rows[t] for t in migration_tests)
 
     scope = 'Project documentation structure only. No product execution or external network checks.'
     if check_migration:

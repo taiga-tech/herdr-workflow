@@ -19,7 +19,7 @@ class CheckDocsModesTest(unittest.TestCase):
             PROJECT_ROOT,
             self.root,
             symlinks=True,
-            ignore=shutil.ignore_patterns(".git", "__pycache__"),
+            ignore=shutil.ignore_patterns(".git", "__pycache__", "target"),
         )
         self.original_root = check_docs.ROOT
         check_docs.ROOT = self.root.resolve()
@@ -74,6 +74,40 @@ class CheckDocsModesTest(unittest.TestCase):
         self.assertFalse(migration_result["ok"])
         self.assertTrue(
             any("Source snapshot modified" in error for error in migration_result["errors"])
+        )
+
+    def test_missing_current_acceptance_test_fails_both_modes(self) -> None:
+        acceptance = self.root / "docs/testing/acceptance.md"
+        text = acceptance.read_text(encoding="utf-8")
+        text = "\n".join(line for line in text.splitlines() if "T33" not in line)
+        acceptance.write_text(f"{text}\n", encoding="utf-8")
+
+        current_result = check_docs.check()
+        migration_result = check_docs.check(check_migration=True)
+        self.assertFalse(current_result["ok"])
+        self.assertFalse(migration_result["ok"])
+        self.assertTrue(
+            any(
+                "acceptance test id is missing" in error.lower()
+                for error in current_result["errors"]
+            )
+        )
+
+    def test_unregistered_current_acceptance_test_fails_both_modes(self) -> None:
+        acceptance = self.root / "docs/testing/acceptance.md"
+        text = acceptance.read_text(encoding="utf-8")
+        text += '\n| <a id="t34"></a>T34 | unregistered fixture | reject |\n'
+        acceptance.write_text(text, encoding="utf-8")
+
+        current_result = check_docs.check()
+        migration_result = check_docs.check(check_migration=True)
+        self.assertFalse(current_result["ok"])
+        self.assertFalse(migration_result["ok"])
+        self.assertTrue(
+            any(
+                "unexpected acceptance test id" in error.lower()
+                for error in current_result["errors"]
+            )
         )
 
 
