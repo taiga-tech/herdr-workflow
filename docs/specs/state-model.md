@@ -3,7 +3,7 @@ id: SPEC-STATE
 title: '状態モデル'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-17'
 ---
 
 # 状態モデル
@@ -52,7 +52,7 @@ outcome = pending / succeeded / failed / cancelled / unknown
 
 ### 起動世代
 
-再試行ごとにAttempt IDを変える。古いAttemptのログ、readiness、終了通知によって新しいAttemptを更新しない。
+再試行ごとにAttempt IDを変える。古いAttemptのログ、readiness、終了通知によって新しいAttemptを更新しない。Attempt結果の記録では、最新より古いAttempt IDの通知を無視し、新しい世代は履歴へ追加する。同じ世代は、現在の結果が`Pending`の間だけ既存の記録を置き換え、起動証跡・結果・ログ位置を更新する。`Pending`以外(`ExitCode`、`UnexpectedExit`、`Signaled`、`LaunchFailed`、`Unknown`)は終端結果として扱い、同世代の後続通知では上書きしない。
 
 serviceの起動直後にプロセスが終了した場合は、HTTP応答が返っていても`ready`にしない。プロセスの生存、対象Attempt、readiness確認結果を同じ判定時点で照合する。
 

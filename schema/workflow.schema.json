@@ -1,0 +1,744 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "WorkflowSpec",
+    "type": "object",
+    "properties": {
+        "bootstrap": {
+            "$ref": "#/$defs/BootstrapConfig"
+        },
+        "cleanup": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/CleanupConfig"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null
+        },
+        "defaults": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/DefaultsConfig"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null
+        },
+        "execution": {
+            "$ref": "#/$defs/ExecutionConfig",
+            "default": {
+                "maxConcurrentJobs": null,
+                "maxLiveAgents": null,
+                "maxLiveServices": null,
+                "onFailure": "stop-dependents",
+                "retries": 0
+            }
+        },
+        "files": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/FilesConfig"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null
+        },
+        "inputs": {
+            "type": "object",
+            "additionalProperties": {
+                "$ref": "#/$defs/InputDef"
+            },
+            "default": {}
+        },
+        "name": {
+            "type": "string"
+        },
+        "tasks": {
+            "type": "object",
+            "additionalProperties": {
+                "$ref": "#/$defs/TaskDef"
+            }
+        },
+        "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+        },
+        "workspace": {
+            "$ref": "#/$defs/WorkspaceConfig"
+        },
+        "worktree": {
+            "$ref": "#/$defs/WorktreeConfig"
+        }
+    },
+    "additionalProperties": false,
+    "required": [
+        "version",
+        "name",
+        "worktree",
+        "bootstrap",
+        "tasks",
+        "workspace"
+    ],
+    "$defs": {
+        "AgentKind": {
+            "type": "string",
+            "enum": ["claude"]
+        },
+        "AgentSpec": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "$ref": "#/$defs/AgentKind"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["kind"]
+        },
+        "BootstrapConfig": {
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            },
+            "additionalProperties": false,
+            "required": ["targets"]
+        },
+        "CheckedOutPolicy": {
+            "type": "string",
+            "enum": ["error"]
+        },
+        "CleanupConfig": {
+            "type": "object",
+            "properties": {
+                "onStop": {
+                    "$ref": "#/$defs/OnStopConfig"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["onStop"]
+        },
+        "DefaultsConfig": {
+            "type": "object",
+            "properties": {
+                "cwd": {
+                    "type": ["string", "null"],
+                    "default": null
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "default": {}
+                },
+                "jobTimeoutSeconds": {
+                    "type": ["integer", "null"],
+                    "format": "uint64",
+                    "default": null,
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false
+        },
+        "DependencyCondition": {
+            "type": "string",
+            "enum": ["succeeded", "ready", "started"]
+        },
+        "DependsOn": {
+            "type": "object",
+            "properties": {
+                "condition": {
+                    "$ref": "#/$defs/DependencyCondition"
+                },
+                "task": {
+                    "type": "string"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["task", "condition"]
+        },
+        "ExecutionConfig": {
+            "type": "object",
+            "properties": {
+                "maxConcurrentJobs": {
+                    "type": ["integer", "null"],
+                    "format": "uint32",
+                    "default": null,
+                    "minimum": 0
+                },
+                "maxLiveAgents": {
+                    "type": ["integer", "null"],
+                    "format": "uint32",
+                    "default": null,
+                    "minimum": 0
+                },
+                "maxLiveServices": {
+                    "type": ["integer", "null"],
+                    "format": "uint32",
+                    "default": null,
+                    "minimum": 0
+                },
+                "onFailure": {
+                    "$ref": "#/$defs/OnFailurePolicy",
+                    "default": "stop-dependents"
+                },
+                "retries": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "default": 0,
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false
+        },
+        "ExistingBranchPolicy": {
+            "type": "string",
+            "enum": ["use"]
+        },
+        "FileCopyRule": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "ifExists": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/IfExistsPolicy"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "optional": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "to": {
+                    "type": "string"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["from", "to"]
+        },
+        "FilesConfig": {
+            "type": "object",
+            "properties": {
+                "copy": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "$ref": "#/$defs/FileCopyRule"
+                    }
+                },
+                "requireIgnored": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "source": {
+                    "$ref": "#/$defs/FilesSource"
+                },
+                "symlinks": {
+                    "$ref": "#/$defs/SymlinkPolicy",
+                    "default": "reject"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["source"]
+        },
+        "FilesSource": {
+            "type": "string",
+            "enum": ["primary"]
+        },
+        "IfExistsPolicy": {
+            "type": "string",
+            "enum": ["error", "skip", "replace"]
+        },
+        "InitialTabPolicy": {
+            "type": "string",
+            "enum": ["preserve"]
+        },
+        "InputDef": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/InputDefault"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "required": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "type": {
+                    "$ref": "#/$defs/InputType"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["type"]
+        },
+        "InputDefault": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                {
+                    "type": "boolean"
+                }
+            ]
+        },
+        "InputType": {
+            "type": "string",
+            "enum": ["string", "integer", "boolean"]
+        },
+        "LayoutConfig": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "columns": {
+                            "type": "integer",
+                            "format": "uint32",
+                            "minimum": 0
+                        },
+                        "rows": {
+                            "type": "integer",
+                            "format": "uint32",
+                            "minimum": 0
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "grid"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type", "columns", "rows"]
+                }
+            ]
+        },
+        "OnDependencyLost": {
+            "type": "string",
+            "enum": ["stop"]
+        },
+        "OnFailurePolicy": {
+            "type": "string",
+            "enum": ["stop-dependents"]
+        },
+        "OnStopConfig": {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "$ref": "#/$defs/PreserveOnlyPolicy"
+                },
+                "panes": {
+                    "$ref": "#/$defs/PreserveOnlyPolicy"
+                },
+                "processes": {
+                    "$ref": "#/$defs/ProcessesCleanupPolicy"
+                },
+                "worktree": {
+                    "$ref": "#/$defs/PreserveOnlyPolicy"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["processes", "panes", "worktree", "branch"]
+        },
+        "PaneConfig": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "placement": {
+                    "$ref": "#/$defs/Placement"
+                },
+                "view": {
+                    "$ref": "#/$defs/PaneView"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["id", "label", "view", "placement"]
+        },
+        "PaneView": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string"
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "logs"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type", "task"]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string"
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "agent"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type", "task"]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "const": "status"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type"]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "const": "shell"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type"]
+                }
+            ]
+        },
+        "Placement": {
+            "type": "object",
+            "properties": {
+                "colSpan": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "default": 1,
+                    "minimum": 0
+                },
+                "column": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "row": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "rowSpan": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "default": 1,
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false,
+            "required": ["column", "row"]
+        },
+        "PreserveOnlyPolicy": {
+            "type": "string",
+            "enum": ["preserve"]
+        },
+        "ProcessesCleanupPolicy": {
+            "type": "string",
+            "enum": ["stop-owned"]
+        },
+        "RunnerKind": {
+            "type": "string",
+            "enum": ["supervised"]
+        },
+        "StopConfig": {
+            "type": "object",
+            "properties": {
+                "graceSeconds": {
+                    "type": ["integer", "null"],
+                    "format": "uint64",
+                    "default": null,
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false
+        },
+        "SymlinkPolicy": {
+            "type": "string",
+            "enum": ["reject"]
+        },
+        "TabConfig": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "layout": {
+                    "$ref": "#/$defs/LayoutConfig"
+                },
+                "panes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/PaneConfig"
+                    }
+                }
+            },
+            "additionalProperties": false,
+            "required": ["id", "label", "layout", "panes"]
+        },
+        "TaskDef": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "argv": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "default": [],
+                            "items": {
+                                "$ref": "#/$defs/DependsOn"
+                            }
+                        },
+                        "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            },
+                            "default": {}
+                        },
+                        "lifecycle": {
+                            "$ref": "#/$defs/TaskLifecycle"
+                        },
+                        "onDependencyLost": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/OnDependencyLost"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "default": null
+                        },
+                        "runner": {
+                            "$ref": "#/$defs/RunnerKind"
+                        },
+                        "stop": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/StopConfig"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "default": null
+                        },
+                        "timeoutSeconds": {
+                            "type": ["integer", "null"],
+                            "format": "uint64",
+                            "default": null,
+                            "minimum": 0
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "command"
+                        },
+                        "waitFor": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/WaitFor"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "default": null
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type", "lifecycle", "runner", "argv"]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "$ref": "#/$defs/AgentSpec"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "default": [],
+                            "items": {
+                                "$ref": "#/$defs/DependsOn"
+                            }
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "agent"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type", "agent"]
+                }
+            ]
+        },
+        "TaskLifecycle": {
+            "type": "string",
+            "enum": ["job", "service"]
+        },
+        "WaitFor": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "consecutiveSuccesses": {
+                            "type": "integer",
+                            "format": "uint32",
+                            "minimum": 0
+                        },
+                        "intervalMilliseconds": {
+                            "type": "integer",
+                            "format": "uint64",
+                            "minimum": 0
+                        },
+                        "status": {
+                            "type": "integer",
+                            "format": "uint16",
+                            "maximum": 65535,
+                            "minimum": 0
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer",
+                            "format": "uint64",
+                            "minimum": 0
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "http"
+                        },
+                        "url": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "type",
+                        "url",
+                        "status",
+                        "timeoutSeconds",
+                        "intervalMilliseconds",
+                        "consecutiveSuccesses"
+                    ]
+                }
+            ]
+        },
+        "WorkspaceConfig": {
+            "type": "object",
+            "properties": {
+                "initialTab": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/InitialTabPolicy"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "label": {
+                    "type": "string"
+                },
+                "tabs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/TabConfig"
+                    }
+                }
+            },
+            "additionalProperties": false,
+            "required": ["label", "tabs"]
+        },
+        "WorktreeConfig": {
+            "type": "object",
+            "properties": {
+                "base": {
+                    "type": ["string", "null"],
+                    "default": null
+                },
+                "branch": {
+                    "description": "\"${inputs.branch}\" のような値置換は生文字列のまま保持する。置換処理は後続段階。",
+                    "type": "string"
+                },
+                "existingBranch": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/ExistingBranchPolicy"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "ifAlreadyCheckedOut": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CheckedOutPolicy"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "mode": {
+                    "$ref": "#/$defs/WorktreeMode"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["mode", "branch"]
+        },
+        "WorktreeMode": {
+            "type": "string",
+            "enum": ["create"]
+        }
+    }
+}

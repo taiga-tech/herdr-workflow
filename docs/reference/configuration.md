@@ -3,7 +3,7 @@ id: REF-CONFIGURATION
 title: '設定リファレンス'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-09-16'
 ---
 
 # 設定リファレンス
@@ -12,11 +12,22 @@ updated: '2026-09-11'
 
 > statusは`draft`です。実装済みとして扱う範囲は、コードと試験結果で確認します。
 
-この文書の管理対象：読み込み、キー表記、値置換、設定例への案内。
+この文書の管理対象：workflow設定とプラグイン全体設定の読み込み、キー表記、値置換、設定例への案内。
 
 <a id="source-06"></a>
 
-## 設定例
+## 設定ファイルの区分
+
+Herdr Workflowは、リポジトリが所有するworkflow設定と、利用者が所有するプラグイン全体設定を分ける。
+
+| 区分               | パス                                                     | 所有者     | 用途                                                       |
+| ------------------ | -------------------------------------------------------- | ---------- | ---------------------------------------------------------- |
+| workflow設定       | 明示した`--config`、または作成元の`.herdr/workflow.yaml` | リポジトリ | Task、DAG、worktree、workspace等の実行定義                 |
+| プラグイン全体設定 | `$HERDR_PLUGIN_CONFIG_DIR/config.yaml`                   | 利用者     | 全workflowへ適用する運用上限と、今後追加する利用者固有設定 |
+
+workflow設定からプラグイン全体設定を上書きできない。プラグイン全体設定と承認情報をリポジトリへコミットしない。[ADR-0006](../decisions/0006-plugin-config.md)
+
+## workflow設定
 
 保存先の案は`.herdr/workflow.yaml`とする。参照先はNext.jsとPrismaを使うプロジェクトの例である。`mise.toml`、Prisma schema、`test:e2e`スクリプトが対象プロジェクトに存在する前提であり、プラグインが自動検出して追加するものではない。
 
@@ -40,9 +51,39 @@ YAMLの外部ファイル読み込み、任意のカスタムタグ、暗黙の�
 
 ### 読み込み元と承認
 
-明示した`--config`を優先し、それ以外は作成元の`.herdr/workflow.yaml`を使う。ユーザー固有の承認と上書き設定は`HERDR_PLUGIN_CONFIG_DIR`側で管理し、承認情報をリポジトリへコミットしない。
+明示した`--config`を優先し、それ以外は作成元の`.herdr/workflow.yaml`を使う。
 
 Run開始時に設定を解決し、ハッシュ付きの実行計画として固定する。worktree作成後に別ブランチの同名設定へ自動的に読み替えない。
+
+## プラグイン全体設定
+
+`HERDR_PLUGIN_CONFIG_DIR`が空でない場合は、その直下の`config.yaml`を読む。環境変数が未設定または空の場合と、`config.yaml`が存在しない場合は組み込み既定値を使う。ファイルが存在するのに読み取れない場合、YAMLが不正な場合、未知キーまたは重複キーを含む場合、未対応の`version`の場合、値が許容範囲外の場合は、workflow設定の検証前に設定エラーとして終了する。異常なファイルを既定値へ黙って置き換えない。
+
+設定例の編集元は[examples/config.yaml](../../examples/config.yaml)とする。初期スキーマは次の構造を持つ。
+
+```yaml
+version: 1
+limits:
+    layout:
+        maxGridDimension: 64
+        maxPanesPerTab: 32
+```
+
+`version`はプラグイン全体設定のスキーマ版であり、workflow設定の`version`およびプラグインのリリース番号とは別に管理する。設定キーはcamelCaseとする。将来の設定は責務ごとのトップレベル領域へ追加し、無関係な値を`limits`へ混在させない。
+
+### プラグイン全体設定のキー
+
+| キー                             | 型   | 省略時           | 許容範囲 | 意味                                                  |
+| -------------------------------- | ---- | ---------------- | -------- | ----------------------------------------------------- |
+| `version`                        | 整数 | 省略不可         | `1`      | プラグイン全体設定のスキーマ版                        |
+| `limits`                         | map  | 各組み込み既定値 | ―        | 資源消費を制限する設定群                              |
+| `limits.layout`                  | map  | 各組み込み既定値 | ―        | レイアウト検証の上限                                  |
+| `limits.layout.maxGridDimension` | 整数 | `64`             | `1..=64` | 一つのgridで許可する`columns`と`rows`それぞれの最大値 |
+| `limits.layout.maxPanesPerTab`   | 整数 | `32`             | `1..=32` | 一つのtabで許可するpane数の最大値                     |
+
+`maxGridDimension`と`maxPanesPerTab`は、利用者がそれぞれ組み込み安全上限64と32を引き下げるための運用上限であり、設定によって安全上限を超える値へ緩和できない。workflow内のいずれかのgridで`columns`または`rows`が有効な`maxGridDimension`を超えた場合、またはtabのpane数が有効な`maxPanesPerTab`を超えた場合は、重複検査やペイン配置を開始する前に拒否する。上限を引き上げる場合は、grid面積、pane数、重複検査と境界探索の時間、およびHerdr側の実動作を測定してから契約を変更する。
+
+`validate`と`plan`はプラグイン全体設定を読み、その有効値でworkflowを検証する。将来Runを開始するコマンドは開始時の有効なプラグイン全体設定も実行計画ハッシュへ含め、そのRunの途中で`config.yaml`を再読込して計画を変更しない。
 
 ## 設定領域の参照先
 
@@ -58,10 +99,10 @@ Run開始時に設定を解決し、ハッシュ付きの実行計画として�
 
 ## 仕様化の残件
 
-設定例は入力形式の提案であり、全キーの機械可読スキーマはまだない。resource lock、秘密値参照、シェルscript、継続health check、個別retryなど、本文に動作方針があり入力形式が未定義の項目は未決事項Q11で管理する。本文にないキーを推測して追加しない。
+設定例は入力形式の提案である。resource lock、秘密値参照、シェルscript、継続health check、個別retryなど、本文に動作方針があり入力形式が未定義の項目は未決事項Q11で管理する。本文にないキーを推測して追加しない。
 
-Rustの設定型を実装した後、JSON Schemaを型から生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。
+Rustの設定型(`WorkflowSpec`)から`herdr-workflow schema`コマンドでJSON Schema(`schema/workflow.schema.json`)を生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。この役割分担は`tests/schema_contract.rs`で固定している(構造的に正しいがDAGとして不正な設定がスキーマ検証を通ることを確認し、その意味検証は`plan::compile::compile`が担う)。
 
 ## 関連文書
 
-[設定例](../../examples/workflow.yaml) / [未決事項](../planning/open-questions.md) / [設定定義の判断](../decisions/0005-configuration-source.md)
+[workflow設定例](../../examples/workflow.yaml) / [プラグイン全体設定例](../../examples/config.yaml) / [未決事項](../planning/open-questions.md) / [workflow設定定義の判断](../decisions/0005-configuration-source.md) / [プラグイン全体設定の判断](../decisions/0006-plugin-config.md)

@@ -3,7 +3,7 @@ id: DOC-STRUCTURE
 title: 'ディレクトリ構成'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-12'
+updated: '2026-09-16'
 ---
 
 # ディレクトリ構成
@@ -16,7 +16,7 @@ updated: '2026-09-12'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・最小限の`src/main.rs`と`src/lib.rs`が存在する。`WorkflowSpec`等の型定義、`herdr-plugin.toml`、JSON Schemaはまだ存在しない。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、workflow設定例とプラグイン全体設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、プラグイン全体設定の読み込み(`config/plugin.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`)が存在する。段階Aで技術的に実装可能な範囲は完了しており、`files.copy`の追跡済みファイル判定とHerdr接続以降のmoduleが段階B以降の対象として残る。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -34,9 +34,33 @@ herdr-workflow/
 ├── skills-lock.json                外部スキルの導入元とハッシュ
 ├── Cargo.toml                      package定義と依存関係
 ├── Cargo.lock                      解決済み依存版の固定
+├── herdr-plugin.toml               validateアクションを登録するプラグインmanifest
+├── schema/
+│   └── workflow.schema.json        WorkflowSpecから生成したJSON Schema
 ├── src/
 │   ├── main.rs                     エントリポイント
-│   └── lib.rs                      公開APIの起点
+│   ├── lib.rs                      公開APIの起点
+│   ├── cli.rs                      validate/planサブコマンド
+│   ├── config/
+│   │   ├── model.rs                WorkflowSpec等の設定型
+│   │   ├── load.rs                 YAML読み込み
+│   │   ├── plugin.rs               プラグイン全体設定の読み込みと検証
+│   │   ├── substitute.rs           値置換の検出・解決
+│   │   └── validate.rs             デシリアライズ後の意味検証
+│   ├── plan/
+│   │   ├── graph.rs                TaskIdのトポロジカルソートと循環検出
+│   │   ├── compile.rs              WorkflowSpec -> ExecutionPlanのcompile
+│   │   ├── compile/
+│   │   │   └── tests.rs            compileのunit test
+│   │   ├── schedule.rs             依存判定を行う副作用なしの純粋関数群
+│   │   ├── schedule/
+│   │   │   └── tests.rs            scheduleのunit test
+│   │   └── layout.rs               gridから二分割木への変換と検証
+│   └── state/
+│       └── models.rs               TaskState、AttemptResult等
+├── tests/
+│   ├── workflow_contract.rs        設定例の実読み込みとcompileの契約試験
+│   └── schema_contract.rs          生成スキーマの妥当性検証
 ├── .agents/skills/
 │   ├── herdr-workflow-docs/
 │   │   ├── SKILL.md                文書同期の判断と手順
@@ -67,7 +91,8 @@ herdr-workflow/
 │   ├── meta/                      元資料と現行文書の移行対応表
 │   └── manifest.json              文書IDとパスの一覧
 ├── examples/
-│   └── workflow.yaml              設定例の編集元
+│   ├── workflow.yaml              workflow設定例の編集元
+│   └── config.yaml                プラグイン全体設定例の編集元
 ├── archive/
 │   ├── README.md                  元資料の扱い
 │   ├── design-0.1.md              元の設計書、そのまま保存
@@ -88,9 +113,9 @@ herdr-workflow/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── mise.toml
-├── herdr-plugin.toml
+├── herdr-plugin.toml               実装済み。actionは今後planやHerdr接続に応じて追加する
 ├── schema/
-│   └── workflow.schema.json       Rust型から生成する予定
+│   └── workflow.schema.json       実装済み。`herdr-workflow schema`で再生成する
 ├── src/
 │   ├── main.rs
 │   ├── lib.rs
@@ -98,10 +123,17 @@ herdr-workflow/
 │   ├── config/
 │   │   ├── model.rs
 │   │   ├── load.rs
+│   │   ├── plugin.rs               プラグイン全体設定の読み込みと検証
+│   │   ├── substitute.rs           値置換の検出・解決
 │   │   └── validate.rs
 │   ├── plan/
 │   │   ├── graph.rs
 │   │   ├── compile.rs
+│   │   ├── compile/
+│   │   │   └── tests.rs
+│   │   ├── schedule.rs             依存判定を行う副作用なしの純粋関数群
+│   │   ├── schedule/
+│   │   │   └── tests.rs
 │   │   └── layout.rs
 │   ├── runtime/
 │   │   ├── coordinator.rs

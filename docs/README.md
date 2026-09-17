@@ -3,7 +3,7 @@ id: DOC-INDEX
 title: '文書目次'
 status: current
 documentVersion: '0.2'
-updated: '2026-09-12'
+updated: '2026-09-16'
 ---
 
 # 文書目次
@@ -92,7 +92,7 @@ updated: '2026-09-12'
 
 ## 設定例と機械可読の一覧
 
-[設定例](../examples/workflow.yaml) / [文書manifest](manifest.json)
+[workflow設定例](../examples/workflow.yaml) / [プラグイン全体設定例](../examples/config.yaml) / [文書manifest](manifest.json)
 
 ## 更新時の確認
 
