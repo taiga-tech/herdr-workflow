@@ -28,6 +28,8 @@ updated: '2026-09-17'
 
 依存条件の省略は認めない。serviceやAgentへ`succeeded`を指定する、jobへ`ready`を指定する等、通常は満たせない指定を検証時に拒否する。`started`はタスク種別を問わず指定できる。Agentの`idle`や`done`を、プログラムの終了コード0と同じ意味では使わない。
 
+`ready`はTaskの実行状態が`running`かつreadinessが`ready`の場合だけ成立する。終了・停止・状態不明のTaskに古いreadinessが残っていても成立しない。
+
 起動失敗(`LaunchFailed`)と起動未確認の結果(`Unknown`)は`started`を満たさない。
 
 依存先が複数ある場合はAND条件とする。OR条件と動的なタスク追加は初期版で扱わない。

@@ -94,15 +94,21 @@ impl TaskRuntimeState {
         self.attempts.last()
     }
 
-    /// 古いAttemptの遅延通知や同じAttemptの重複通知による上書きを防ぐ
+    /// 同じAttemptの未確定結果は更新し、古い世代や確定済み結果の上書きを防ぐ
     /// (state-model.md「起動世代」、T16)。
     pub fn record_attempt_result(&mut self, result: AttemptResult) {
-        let is_stale = self
-            .current_attempt()
-            .is_some_and(|latest| result.attempt_id <= latest.attempt_id);
-        if !is_stale {
-            self.attempts.push(result);
+        if let Some(latest) = self.attempts.last_mut() {
+            if result.attempt_id < latest.attempt_id {
+                return;
+            }
+            if result.attempt_id == latest.attempt_id {
+                if latest.outcome == AttemptOutcome::Pending {
+                    *latest = result;
+                }
+                return;
+            }
         }
+        self.attempts.push(result);
     }
 }
 
@@ -169,5 +175,52 @@ mod tests {
 
         assert_eq!(runtime.current_attempt(), Some(&completed));
         assert_eq!(runtime.attempts, vec![completed]);
+    }
+
+    #[test]
+    fn record_attempt_result_completes_pending_attempt_and_ignores_delayed_pending() {
+        // 同じ世代の終了結果は既存要素を更新し、遅延した未確定通知で後退しない。
+        let mut runtime = TaskRuntimeState::default();
+        runtime.record_attempt_result(sample_result(1));
+        let mut completed = sample_result(1);
+        completed.outcome = AttemptOutcome::ExitCode(0);
+        completed.log_position = LogPosition {
+            byte_offset: 120,
+            line_number: 8,
+        };
+        runtime.record_attempt_result(completed.clone());
+
+        assert_eq!(runtime.current_attempt(), Some(&completed));
+        assert_eq!(runtime.attempts.len(), 1);
+
+        runtime.record_attempt_result(sample_result(1));
+
+        assert_eq!(runtime.current_attempt(), Some(&completed));
+        assert_eq!(runtime.attempts, vec![completed]);
+    }
+
+    #[test]
+    fn record_attempt_result_preserves_every_terminal_outcome() {
+        // Pending以外は終端結果とし、同世代の別結果やPendingで上書きしない。
+        for outcome in [
+            AttemptOutcome::ExitCode(1),
+            AttemptOutcome::UnexpectedExit,
+            AttemptOutcome::Signaled("SIGTERM".to_string()),
+            AttemptOutcome::LaunchFailed("command not found".to_string()),
+            AttemptOutcome::Unknown,
+        ] {
+            let mut runtime = TaskRuntimeState::default();
+            let mut terminal = sample_result(1);
+            terminal.outcome = outcome;
+            runtime.record_attempt_result(sample_result(1));
+            runtime.record_attempt_result(terminal.clone());
+            runtime.record_attempt_result(sample_result(1));
+            let mut conflicting = sample_result(1);
+            conflicting.outcome = AttemptOutcome::ExitCode(0);
+            runtime.record_attempt_result(conflicting);
+
+            assert_eq!(runtime.current_attempt(), Some(&terminal));
+            assert_eq!(runtime.attempts, vec![terminal]);
+        }
     }
 }

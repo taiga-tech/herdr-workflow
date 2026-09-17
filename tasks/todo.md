@@ -377,3 +377,27 @@ docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満�
 - 項目4は報告のみ。developとの差分で「Rust採用だけをaccepted」から「利用者が採用を明示した判断」への変更とADR-0006のaccepted追加を確認した。承認の有無は判断せず、ADRは編集していない。
 - 独立レビューで追加指摘なし。追加テストの型・書式のコンパイルエラーとClippyの不要参照を修正後、`cargo test`(単体132件・統合10件)、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`が成功した。CLIバイナリの引数エラーも3ケース確認した。
 - `mise run docs:test`(5件)、`mise run docs:check`、変更Markdownの`prettier --check`、`git diff --check`が成功した。Herdr実機・実Agent起動は未実施。コミットは行っていない。
+
+## PR #3: 外部レビュー4件への対応
+
+### 仕様と計画
+
+古いAttempt世代は無視し、同じ世代はPendingの間だけ既存要素を更新する。Pending以外の結果は同世代の通知で上書きしない。Ready依存条件はRunningかつReadyに限定する。分割木には各再帰領域のfirst_spanとtotal_spanを保存する。コピー先はCurDirを除去したパス要素列で同一・親子を検出する。
+
+- [x] HEAD 16fa51eとクリーンな作業ツリー、仕様・教訓を確認する
+- [x] Attempt更新とReady条件を修正し回帰テストを追加する
+- [x] 分割比率を保存し既存期待値と回帰テストを更新する
+- [x] コピー先を字句的に正規化して衝突を検査する
+- [x] 関連仕様と教訓を更新し独立レビューを行う
+- [x] Cargoの3検査とdocs:test / docs:check、書式・差分検査を完了する
+
+### レビュー
+
+- 項目1: `record_attempt_result`を、古い世代は無視・同一世代はPendingの間だけin-place更新・Pending以外は終端結果として保護する規則に修正した。Pending→ExitCode→遅延Pendingの一連の更新と、全終端結果(ExitCode/UnexpectedExit/Signaled/LaunchFailed/Unknown)が上書きされないことを回帰テストで確認した。
+- 項目2: `condition_met`のReady判定に`TaskState::Running`を追加し、Waiting/Starting/Succeeded/Failed/Stopping/Stopped/Cancelled/Skipped/Unknownの各状態でreadiness=Readyが残っていても成立しないことをテストした。
+- 項目3: `SplitNode::Split`に`first_span`/`total_span`(JSON: `firstSpan`/`totalSpan`)を追加し、両軸・複数階層の再帰領域で正しい比率を保存・復元できることをテストで確認した。既存の期待値(exampleワークフロー、対称レイアウトテスト)も新フィールドに合わせて更新した。
+- 項目4: `paths_conflict`をパスの`Component`単位比較に変更し、先頭の`CurDir`を除去した上で同一・親子関係を検出するようにした。`.env`/`./.env`、`config/`/`config/local.env`、`config/local.env`/`config//local.env`が指定順によらず`OverlappingCopyDestination`になること、`config`/`config-old/local.env`のような文字列前方一致のみのケースは許可されることを確認した。
+- 関連仕様(state-model.md、workflow.md、layout.md、worktree.md、acceptance.md)を契約変更に同期し、教訓を追記した。
+- 独立検証として`cargo test`(単体139件・統合10件)、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`mise run docs:test`(5件)、`mise run docs:check`が全て成功することを確認した。Herdr実機・実Agent起動は未実施。コミットは行っていない。
+
+検証後に記録する。コミットは行わない。

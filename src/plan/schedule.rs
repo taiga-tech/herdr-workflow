@@ -18,7 +18,10 @@ fn state_of(states: &TaskStates, id: &TaskId) -> TaskRuntimeState {
 fn condition_met(condition: DependencyCondition, dependency_state: &TaskRuntimeState) -> bool {
     match condition {
         DependencyCondition::Succeeded => dependency_state.state == TaskState::Succeeded,
-        DependencyCondition::Ready => dependency_state.readiness == ReadinessState::Ready,
+        DependencyCondition::Ready => {
+            dependency_state.state == TaskState::Running
+                && dependency_state.readiness == ReadinessState::Ready
+        }
         DependencyCondition::Started => dependency_state.current_attempt().is_some_and(|attempt| {
             !matches!(
                 attempt.outcome,

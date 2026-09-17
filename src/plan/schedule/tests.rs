@@ -177,6 +177,36 @@ fn started_condition_is_met_once_an_attempt_actually_launched() {
 // --- 2. serviceのready後にE2Eを実行する ------------------------------------
 
 #[test]
+fn ready_condition_requires_a_running_service() {
+    // readinessの古い値が残っていても、生存中でなければ依存を解放しない。
+    for state in [
+        TaskState::Waiting,
+        TaskState::Starting,
+        TaskState::Succeeded,
+        TaskState::Failed,
+        TaskState::Stopping,
+        TaskState::Stopped,
+        TaskState::Cancelled,
+        TaskState::Skipped,
+        TaskState::Unknown,
+    ] {
+        let runtime = TaskRuntimeState {
+            state,
+            ..running_and_ready()
+        };
+        assert!(
+            !condition_met(DependencyCondition::Ready, &runtime),
+            "ready must not be met in {state:?}"
+        );
+    }
+
+    assert!(condition_met(
+        DependencyCondition::Ready,
+        &running_and_ready()
+    ));
+}
+
+#[test]
 fn tests_task_waits_for_server_readiness() {
     let plan = example_plan();
     let mut states = TaskStates::new();

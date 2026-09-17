@@ -4,6 +4,7 @@
 //! ここでは扱わない。
 
 use std::collections::HashSet;
+use std::path::{Component, Path};
 
 use crate::config::model::{InputId, InputType, PaneId, TabId, WorkflowSpec};
 use crate::config::substitute::{self, RESERVED_RUNTIME_NAMESPACES};
@@ -218,12 +219,16 @@ fn validate_copy_paths(spec: &WorkflowSpec) -> Result<(), ValidateError> {
 }
 
 fn paths_conflict(a: &str, b: &str) -> bool {
-    if a == b {
-        return true;
-    }
-    let a_prefix = format!("{a}/");
-    let b_prefix = format!("{b}/");
-    a.starts_with(&b_prefix) || b.starts_with(&a_prefix)
+    // componentsで区切りの表記揺れを吸収し、先頭のCurDirも明示的に除く。
+    let a: Vec<_> = Path::new(a)
+        .components()
+        .filter(|part| *part != Component::CurDir)
+        .collect();
+    let b: Vec<_> = Path::new(b)
+        .components()
+        .filter(|part| *part != Component::CurDir)
+        .collect();
+    a.starts_with(&b) || b.starts_with(&a)
 }
 
 #[cfg(test)]
@@ -398,6 +403,44 @@ mod tests {
                 second: 1
             }
         );
+    }
+
+    #[test]
+    fn normalized_overlapping_copy_destinations_are_rejected() {
+        // 同一パスの表記揺れと親子関係は、指定順を入れ替えても拒否する。
+        for (a, b) in [
+            (".env", "./.env"),
+            ("config/", "config/local.env"),
+            ("config/local.env", "config//local.env"),
+            ("./config/./", "config/local.env"),
+        ] {
+            for (first, second) in [(a, b), (b, a)] {
+                let spec = spec_with_copy_rules(vec![
+                    copy_rule("source-a", first),
+                    copy_rule("source-b", second),
+                ]);
+                assert_eq!(
+                    validate(&spec),
+                    Err(ValidateError::OverlappingCopyDestination {
+                        first: 0,
+                        second: 1,
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn copy_destinations_with_only_textual_prefix_are_allowed() {
+        // 文字列の接頭辞が同じでも、要素が異なるパスや兄弟ファイルは衝突しない。
+        for (a, b) in [
+            ("config", "config-old/local.env"),
+            ("config/a", "config/ab"),
+        ] {
+            let spec =
+                spec_with_copy_rules(vec![copy_rule("source-a", a), copy_rule("source-b", b)]);
+            assert_eq!(validate(&spec), Ok(()));
+        }
     }
 
     #[test]

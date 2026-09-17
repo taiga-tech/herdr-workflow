@@ -23,6 +23,12 @@ pub enum SplitNode {
     },
     Split {
         direction: SplitDirection,
+        /// 分割軸に沿って先頭の子が占める列数または行数。
+        #[serde(rename = "firstSpan")]
+        first_span: u32,
+        /// 分割対象の領域全体の列数または行数。
+        #[serde(rename = "totalSpan")]
+        total_span: u32,
         first: Box<SplitNode>,
         second: Box<SplitNode>,
     },
@@ -255,6 +261,8 @@ fn split_region(
             };
             return Ok(SplitNode::Split {
                 direction: SplitDirection::Right,
+                first_span: col - region.col_start + 1,
+                total_span: region.col_end - region.col_start + 1,
                 first: Box::new(split_region(tab, &left, panes)?),
                 second: Box::new(split_region(tab, &right, panes)?),
             });
@@ -273,6 +281,8 @@ fn split_region(
             };
             return Ok(SplitNode::Split {
                 direction: SplitDirection::Down,
+                first_span: row - region.row_start + 1,
+                total_span: region.row_end - region.row_start + 1,
                 first: Box::new(split_region(tab, &top, panes)?),
                 second: Box::new(split_region(tab, &bottom, panes)?),
             });
@@ -369,8 +379,12 @@ mod tests {
         let expected = SplitTree {
             root: SplitNode::Split {
                 direction: SplitDirection::Down,
+                first_span: 1,
+                total_span: 2,
                 first: Box::new(SplitNode::Split {
                     direction: SplitDirection::Right,
+                    first_span: 3,
+                    total_span: 6,
                     first: Box::new(SplitNode::Leaf {
                         pane: PaneId("A".to_string()),
                     }),
@@ -380,11 +394,15 @@ mod tests {
                 }),
                 second: Box::new(SplitNode::Split {
                     direction: SplitDirection::Right,
+                    first_span: 1,
+                    total_span: 6,
                     first: Box::new(SplitNode::Leaf {
                         pane: PaneId("C".to_string()),
                     }),
                     second: Box::new(SplitNode::Split {
                         direction: SplitDirection::Right,
+                        first_span: 4,
+                        total_span: 5,
                         first: Box::new(SplitNode::Leaf {
                             pane: PaneId("D".to_string()),
                         }),
@@ -427,17 +445,118 @@ mod tests {
                 tree.root,
                 SplitNode::Split {
                     direction: outer_direction,
+                    first_span: 1,
+                    total_span: 2,
                     first: Box::new(SplitNode::Leaf {
                         pane: PaneId("A".to_string())
                     }),
                     second: Box::new(SplitNode::Split {
                         direction: inner_direction,
+                        first_span: 1,
+                        total_span: 2,
                         first: Box::new(SplitNode::Leaf {
                             pane: PaneId("B".to_string())
                         }),
                         second: Box::new(SplitNode::Leaf {
                             pane: PaneId("C".to_string())
                         }),
+                    }),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn split_ratios_distinguish_layouts_on_both_axes_and_survive_serialization() {
+        // 木構造とgrid寸法が同じでも、1:3と3:1の配置を復元できる。
+        for direction in [SplitDirection::Right, SplitDirection::Down] {
+            for first_span in [1, 3] {
+                let tab = match direction {
+                    SplitDirection::Right => tab_with(
+                        4,
+                        1,
+                        vec![
+                            pane("A", 1, 1, first_span, 1),
+                            pane("B", first_span + 1, 1, 4 - first_span, 1),
+                        ],
+                    ),
+                    SplitDirection::Down => tab_with(
+                        1,
+                        4,
+                        vec![
+                            pane("A", 1, 1, 1, first_span),
+                            pane("B", 1, first_span + 1, 1, 4 - first_span),
+                        ],
+                    ),
+                };
+                let tree = compile_layout(&tab).unwrap();
+                assert_eq!(
+                    tree.root,
+                    SplitNode::Split {
+                        direction,
+                        first_span,
+                        total_span: 4,
+                        first: Box::new(SplitNode::Leaf {
+                            pane: PaneId("A".to_string())
+                        }),
+                        second: Box::new(SplitNode::Leaf {
+                            pane: PaneId("B".to_string())
+                        }),
+                    }
+                );
+                let json = serde_json::to_value(&tree).unwrap();
+                assert_eq!(json["root"]["firstSpan"], first_span);
+                assert_eq!(json["root"]["totalSpan"], 4);
+            }
+        }
+    }
+
+    #[test]
+    fn nested_split_ratios_use_the_current_region_on_both_axes() {
+        // 再帰先の開始位置が1でなくても、全gridではなく現在の領域を基準にする。
+        for direction in [SplitDirection::Right, SplitDirection::Down] {
+            let tab = match direction {
+                SplitDirection::Right => tab_with(
+                    6,
+                    1,
+                    vec![
+                        pane("A", 1, 1, 2, 1),
+                        pane("B", 3, 1, 1, 1),
+                        pane("C", 4, 1, 3, 1),
+                    ],
+                ),
+                SplitDirection::Down => tab_with(
+                    1,
+                    6,
+                    vec![
+                        pane("A", 1, 1, 1, 2),
+                        pane("B", 1, 3, 1, 1),
+                        pane("C", 1, 4, 1, 3),
+                    ],
+                ),
+            };
+            let tree = compile_layout(&tab).unwrap();
+            let SplitNode::Split {
+                first_span,
+                total_span,
+                second,
+                ..
+            } = tree.root
+            else {
+                panic!("expected outer split");
+            };
+            assert_eq!((first_span, total_span), (2, 6));
+            assert_eq!(
+                *second,
+                SplitNode::Split {
+                    direction,
+                    first_span: 1,
+                    total_span: 4,
+                    first: Box::new(SplitNode::Leaf {
+                        pane: PaneId("B".to_string())
+                    }),
+                    second: Box::new(SplitNode::Leaf {
+                        pane: PaneId("C".to_string())
                     }),
                 }
             );
