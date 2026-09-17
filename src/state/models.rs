@@ -94,12 +94,12 @@ impl TaskRuntimeState {
         self.attempts.last()
     }
 
-    /// 古いAttemptの遅延通知が新しいAttemptの結果を上書きしないようにする
+    /// 古いAttemptの遅延通知や同じAttemptの重複通知による上書きを防ぐ
     /// (state-model.md「起動世代」、T16)。
     pub fn record_attempt_result(&mut self, result: AttemptResult) {
         let is_stale = self
             .current_attempt()
-            .is_some_and(|latest| result.attempt_id < latest.attempt_id);
+            .is_some_and(|latest| result.attempt_id <= latest.attempt_id);
         if !is_stale {
             self.attempts.push(result);
         }
@@ -154,5 +154,20 @@ mod tests {
         runtime.record_attempt_result(sample_result(1));
         assert_eq!(runtime.current_attempt().unwrap().attempt_id, AttemptId(2));
         assert_eq!(runtime.attempts.len(), 1);
+    }
+
+    #[test]
+    fn record_attempt_result_ignores_duplicate_attempt_without_overwriting_result() {
+        // 同じ世代の再送・遅延通知は、確定済みの結果と起動証跡を上書きしない。
+        let mut runtime = TaskRuntimeState::default();
+        let mut completed = sample_result(2);
+        completed.outcome = AttemptOutcome::ExitCode(0);
+        completed.log_position.byte_offset = 100;
+        runtime.record_attempt_result(completed.clone());
+        runtime.record_attempt_result(completed.clone());
+        runtime.record_attempt_result(sample_result(2));
+
+        assert_eq!(runtime.current_attempt(), Some(&completed));
+        assert_eq!(runtime.attempts, vec![completed]);
     }
 }

@@ -19,9 +19,12 @@ fn condition_met(condition: DependencyCondition, dependency_state: &TaskRuntimeS
     match condition {
         DependencyCondition::Succeeded => dependency_state.state == TaskState::Succeeded,
         DependencyCondition::Ready => dependency_state.readiness == ReadinessState::Ready,
-        DependencyCondition::Started => dependency_state
-            .current_attempt()
-            .is_some_and(|attempt| !matches!(attempt.outcome, AttemptOutcome::LaunchFailed(_))),
+        DependencyCondition::Started => dependency_state.current_attempt().is_some_and(|attempt| {
+            !matches!(
+                attempt.outcome,
+                AttemptOutcome::LaunchFailed(_) | AttemptOutcome::Unknown
+            )
+        }),
     }
 }
 
@@ -39,15 +42,15 @@ pub fn runnable_tasks(plan: &ExecutionPlan, states: &TaskStates) -> BTreeSet<Tas
         .all(|id| state_of(states, id).state == TaskState::Succeeded);
 
     plan.tasks
-        .values()
-        .filter(|task| state_of(states, &task.id).state == TaskState::Waiting)
-        .filter(|task| plan.init_boundary.contains(&task.id) || init_complete)
-        .filter(|task| {
+        .iter()
+        .filter(|(id, _)| state_of(states, id).state == TaskState::Waiting)
+        .filter(|(id, _)| plan.init_boundary.contains(*id) || init_complete)
+        .filter(|(_, task)| {
             task.depends_on.iter().all(|dependency| {
                 condition_met(dependency.condition, &state_of(states, &dependency.task))
             })
         })
-        .map(|task| task.id.clone())
+        .map(|(id, _)| id.clone())
         .collect()
 }
 

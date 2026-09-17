@@ -96,6 +96,31 @@ pub fn parse_args(args: &[String]) -> Result<Command, CliError> {
     }
 }
 
+/// パースが途中で失敗しても、値として消費される`--json`はフラグと区別する。
+pub fn parse_error_output(args: &[String], error: &CliError) -> (i32, String) {
+    let mut json = false;
+    let mut flags = args.iter().skip(1);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--config" | "--input" | "--output" => {
+                flags.next();
+            }
+            "--json" => json = true,
+            _ => {}
+        }
+    }
+    (
+        2,
+        error_output(
+            json,
+            ErrorEnvelope {
+                stage: "cli",
+                message: error.to_string(),
+            },
+        ),
+    )
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorEnvelope {
     stage: &'static str,
@@ -236,36 +261,25 @@ fn run_plan(
         .map(|(k, v)| (InputId(k.clone()), v.clone()))
         .collect();
 
+    let validation_error = |err: crate::config::validate::ValidateError| {
+        (
+            2,
+            error_output(
+                json,
+                ErrorEnvelope {
+                    stage: "validate",
+                    message: err.to_string(),
+                },
+            ),
+        )
+    };
     let resolved = match substitute::resolve_inputs(&spec, &provided) {
         Ok(r) => r,
-        Err(err) => {
-            return (
-                2,
-                error_output(
-                    json,
-                    ErrorEnvelope {
-                        stage: "validate",
-                        message: err.to_string(),
-                    },
-                ),
-            );
-        }
+        Err(err) => return validation_error(err),
     };
-
     let resolved_values = match substitute::substitute_all(&spec, &resolved) {
         Ok(v) => v,
-        Err(err) => {
-            return (
-                2,
-                error_output(
-                    json,
-                    ErrorEnvelope {
-                        stage: "validate",
-                        message: err.to_string(),
-                    },
-                ),
-            );
-        }
+        Err(err) => return validation_error(err),
     };
 
     let hash = plan_hash(&spec, plugin_config, &resolved);
@@ -328,6 +342,19 @@ fn error_output(json: bool, envelope: ErrorEnvelope) -> String {
     }
 }
 
+struct HashWriter(Sha256);
+
+impl std::io::Write for HashWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn plan_hash(
     spec: &WorkflowSpec,
     plugin_config: &PluginConfig,
@@ -338,10 +365,10 @@ fn plan_hash(
         plugin_config,
         resolved_inputs: resolved,
     };
-    let canonical = serde_json::to_string(&hash_input).expect("WorkflowSpec must serialize");
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.as_bytes());
-    let digest = hasher.finalize();
+    // JSON全体を保持せず、同じバイト列を順次ハッシャーへ渡す。
+    let mut writer = HashWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, &hash_input).expect("WorkflowSpec must serialize");
+    let digest = writer.0.finalize();
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write as _;
@@ -353,6 +380,92 @@ fn plan_hash(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_errors_follow_json_flag_and_escape_messages() {
+        // 制御文字・引用符・逆斜線を含む引数でもJSONとして復元できる。
+        for bad in ["bad\0\u{1b}\n\t\"\\日本語", "--bogus"] {
+            for json_first in [false, true] {
+                let mut args = vec!["validate".to_string(), bad.to_string()];
+                args.insert(if json_first { 1 } else { 2 }, "--json".to_string());
+                let err = parse_args(&args).unwrap_err();
+                let (code, output) = parse_error_output(&args, &err);
+                let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+                assert_eq!(code, 2);
+                assert_eq!(value["ok"], false);
+                assert_eq!(value["error"]["stage"], "cli");
+                assert_eq!(value["error"]["message"], err.to_string());
+            }
+        }
+        // フラグなし、またはオプション値としての--jsonはプレーンテキスト。
+        for args in [
+            vec![],
+            vec!["bad"],
+            vec!["validate", "--config", "--json", "--bad"],
+        ] {
+            let args: Vec<String> = args.into_iter().map(str::to_string).collect();
+            let err = parse_args(&args).unwrap_err();
+            assert_eq!(
+                parse_error_output(&args, &err),
+                (2, format!("エラー(cli): {err}"))
+            );
+        }
+    }
+
+    #[test]
+    fn streamed_plan_hash_matches_previous_json_hash() {
+        // エスケープやUTF-8を含め、従来のJSONバイト列のハッシュと一致する。
+        let spec = load::load_file(example_config()).unwrap();
+        let plugin = PluginConfig::default();
+        for branch in ["feature/x", "日本語\n\"\\\0"] {
+            let provided = BTreeMap::from([(InputId("branch".into()), branch.into())]);
+            let resolved = substitute::resolve_inputs(&spec, &provided).unwrap();
+            let canonical = serde_json::to_string(&HashInput {
+                spec: &spec,
+                plugin_config: &plugin,
+                resolved_inputs: &resolved,
+            })
+            .unwrap();
+            let hex: String = Sha256::digest(canonical.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let expected = format!("sha256:{hex}");
+            assert_eq!(plan_hash(&spec, &plugin, &resolved), expected);
+        }
+    }
+
+    #[test]
+    fn input_resolution_and_substitution_errors_share_output_contract() {
+        // 必須入力不足と、省略した任意入力の置換失敗を両方の出力形式で検証する。
+        let yaml = std::fs::read_to_string(example_config()).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "workflow-optional-input-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&path, yaml.replace("required: true", "required: false")).unwrap();
+        for config in [example_config(), path.clone()] {
+            for json in [false, true] {
+                let (code, output) = run_plan(&config, &[], json, &PluginConfig::default());
+                assert_eq!(code, 2);
+                if json {
+                    let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+                    assert_eq!(value["ok"], false);
+                    assert_eq!(value["error"]["stage"], "validate");
+                    assert!(
+                        value["error"]["message"]
+                            .as_str()
+                            .unwrap()
+                            .contains("branch")
+                    );
+                } else {
+                    assert!(output.starts_with("エラー(validate): "));
+                    assert!(output.contains("branch"));
+                }
+            }
+        }
+        std::fs::remove_file(path).unwrap();
+    }
 
     fn example_config() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/workflow.yaml")

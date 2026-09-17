@@ -129,6 +129,32 @@ fn started_condition_is_not_met_when_launch_failed() {
 }
 
 #[test]
+fn started_condition_is_not_met_when_latest_launch_is_unknown() {
+    // 過去に起動済みの世代があっても、最新世代が起動未確認なら依存を解放しない。
+    let mut runtime = TaskRuntimeState::default();
+    for (attempt_id, outcome) in [
+        (1, AttemptOutcome::ExitCode(0)),
+        (2, AttemptOutcome::Unknown),
+    ] {
+        runtime.record_attempt_result(AttemptResult {
+            attempt_id: AttemptId(attempt_id),
+            launch_evidence: LaunchEvidence {
+                pid: None,
+                started_at: None,
+                command_summary: "mise install".to_string(),
+            },
+            outcome,
+            log_position: LogPosition {
+                byte_offset: 0,
+                line_number: 0,
+            },
+        });
+    }
+
+    assert!(!condition_met(DependencyCondition::Started, &runtime));
+}
+
+#[test]
 fn started_condition_is_met_once_an_attempt_actually_launched() {
     let mut runtime = TaskRuntimeState::default();
     runtime.record_attempt_result(AttemptResult {

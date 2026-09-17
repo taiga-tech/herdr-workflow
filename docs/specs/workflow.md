@@ -3,7 +3,7 @@ id: SPEC-WORKFLOW
 title: 'DAGとスケジューラ'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-12'
+updated: '2026-09-17'
 ---
 
 # DAGとスケジューラ
@@ -27,6 +27,8 @@ updated: '2026-09-12'
 | `started`   | Attemptのプロセス起動を確認済み                                          | 起動だけで足りる補助処理。設定で明示した場合に限る |
 
 依存条件の省略は認めない。serviceやAgentへ`succeeded`を指定する、jobへ`ready`を指定する等、通常は満たせない指定を検証時に拒否する。`started`はタスク種別を問わず指定できる。Agentの`idle`や`done`を、プログラムの終了コード0と同じ意味では使わない。
+
+起動失敗(`LaunchFailed`)と起動未確認の結果(`Unknown`)は`started`を満たさない。
 
 依存先が複数ある場合はAND条件とする。OR条件と動的なタスク追加は初期版で扱わない。
 

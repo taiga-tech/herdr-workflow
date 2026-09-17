@@ -21,7 +21,6 @@ pub enum PlannedTaskKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlannedTask {
-    pub id: TaskId,
     pub kind: PlannedTaskKind,
     pub depends_on: Vec<DependsOn>,
     pub on_dependency_lost: Option<OnDependencyLost>,
@@ -131,7 +130,6 @@ pub fn compile_with_plugin_config(
         tasks.insert(
             id.clone(),
             PlannedTask {
-                id: id.clone(),
                 kind,
                 depends_on,
                 on_dependency_lost,
@@ -139,11 +137,11 @@ pub fn compile_with_plugin_config(
         );
     }
 
-    for task in tasks.values() {
+    for (id, task) in &tasks {
         for dependency in &task.depends_on {
             if !tasks.contains_key(&dependency.task) {
                 return Err(CompileError::UnknownDependency {
-                    task: task.id.clone(),
+                    task: id.clone(),
                     dependency: dependency.task.clone(),
                 });
             }
@@ -152,10 +150,10 @@ pub fn compile_with_plugin_config(
 
     let all_task_ids: BTreeSet<TaskId> = tasks.keys().cloned().collect();
     let depends_on_map: BTreeMap<TaskId, Vec<TaskId>> = tasks
-        .values()
-        .map(|task| {
+        .iter()
+        .map(|(id, task)| {
             (
-                task.id.clone(),
+                id.clone(),
                 task.depends_on.iter().map(|d| d.task.clone()).collect(),
             )
         })
@@ -163,7 +161,7 @@ pub fn compile_with_plugin_config(
     let topo_order = graph::topo_order(&all_task_ids, &depends_on_map)
         .map_err(CompileError::CyclicDependency)?;
 
-    for task in tasks.values() {
+    for (id, task) in &tasks {
         for dependency in &task.depends_on {
             let target_kind = tasks[&dependency.task].kind;
             let satisfiable = matches!(
@@ -175,7 +173,7 @@ pub fn compile_with_plugin_config(
             );
             if !satisfiable {
                 return Err(CompileError::UnsatisfiableCondition {
-                    task: task.id.clone(),
+                    task: id.clone(),
                     on: dependency.task.clone(),
                     condition: dependency.condition,
                 });
@@ -269,14 +267,14 @@ fn validate_agent_panes(
         }
     }
 
-    for task in tasks
-        .values()
-        .filter(|task| task.kind == PlannedTaskKind::Agent)
+    for (id, _) in tasks
+        .iter()
+        .filter(|(_, task)| task.kind == PlannedTaskKind::Agent)
     {
-        let count = pane_counts.get(&task.id).copied().unwrap_or_default();
+        let count = pane_counts.get(id).copied().unwrap_or_default();
         if count != 1 {
             return Err(CompileError::InvalidAgentPaneCount {
-                task: task.id.clone(),
+                task: id.clone(),
                 count,
             });
         }

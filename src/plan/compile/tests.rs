@@ -355,3 +355,18 @@ fn compile_rejects_spec_with_zero_execution_limit() {
         })
     ));
 }
+
+#[test]
+fn serialized_plan_identifies_tasks_by_map_keys() {
+    // タスクIDはマップのキーに集約し、依存参照と同じIDで計画を参照できる。
+    let spec = example_spec();
+    let plan = compile(&spec).expect("example workflow should compile");
+    let json = serde_json::to_value(&plan).expect("plan should serialize");
+    let tasks = json["tasks"].as_object().unwrap();
+    assert_eq!(tasks.len(), spec.tasks.len());
+    for id in spec.tasks.keys() {
+        let task = &tasks[&id.0];
+        assert!(task.get("id").is_none());
+        assert!(task.get("kind").is_some());
+    }
+}

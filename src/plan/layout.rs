@@ -213,20 +213,23 @@ fn validate_grid(
     Ok(())
 }
 
-fn no_pane_straddles_column(panes: &[ResolvedPane], region: &Region, col: u32) -> bool {
+fn no_pane_straddles_cut(
+    panes: &[ResolvedPane],
+    region: &Region,
+    direction: SplitDirection,
+    cut: u32,
+) -> bool {
     panes
         .iter()
         .filter(|p| p.col_start >= region.col_start && p.col_end <= region.col_end)
         .filter(|p| p.row_start >= region.row_start && p.row_end <= region.row_end)
-        .all(|p| !(p.col_start <= col && col < p.col_end))
-}
-
-fn no_pane_straddles_row(panes: &[ResolvedPane], region: &Region, row: u32) -> bool {
-    panes
-        .iter()
-        .filter(|p| p.col_start >= region.col_start && p.col_end <= region.col_end)
-        .filter(|p| p.row_start >= region.row_start && p.row_end <= region.row_end)
-        .all(|p| !(p.row_start <= row && row < p.row_end))
+        .all(|p| {
+            let (start, end) = match direction {
+                SplitDirection::Right => (p.col_start, p.col_end),
+                SplitDirection::Down => (p.row_start, p.row_end),
+            };
+            !(start <= cut && cut < end)
+        })
 }
 
 fn split_region(
@@ -241,7 +244,7 @@ fn split_region(
     }
 
     for col in region.col_start..region.col_end {
-        if no_pane_straddles_column(panes, region, col) {
+        if no_pane_straddles_cut(panes, region, SplitDirection::Right, col) {
             let left = Region {
                 col_end: col,
                 ..*region
@@ -259,7 +262,7 @@ fn split_region(
     }
 
     for row in region.row_start..region.row_end {
-        if no_pane_straddles_row(panes, region, row) {
+        if no_pane_straddles_cut(panes, region, SplitDirection::Down, row) {
             let top = Region {
                 row_end: row,
                 ..*region
@@ -393,6 +396,52 @@ mod tests {
             },
         };
         assert_eq!(tree, expected);
+    }
+
+    #[test]
+    fn spanning_panes_allow_nested_cuts_on_both_axes() {
+        // 軸を入れ替えてもpane内部の分割を避け、再帰先の領域外にあるpaneは無視する。
+        let cases = [
+            (
+                vec![
+                    pane("A", 1, 1, 2, 1),
+                    pane("B", 1, 2, 1, 1),
+                    pane("C", 2, 2, 1, 1),
+                ],
+                SplitDirection::Down,
+                SplitDirection::Right,
+            ),
+            (
+                vec![
+                    pane("A", 1, 1, 1, 2),
+                    pane("B", 2, 1, 1, 1),
+                    pane("C", 2, 2, 1, 1),
+                ],
+                SplitDirection::Right,
+                SplitDirection::Down,
+            ),
+        ];
+        for (panes, outer_direction, inner_direction) in cases {
+            let tree = compile_layout(&tab_with(2, 2, panes)).unwrap();
+            assert_eq!(
+                tree.root,
+                SplitNode::Split {
+                    direction: outer_direction,
+                    first: Box::new(SplitNode::Leaf {
+                        pane: PaneId("A".to_string())
+                    }),
+                    second: Box::new(SplitNode::Split {
+                        direction: inner_direction,
+                        first: Box::new(SplitNode::Leaf {
+                            pane: PaneId("B".to_string())
+                        }),
+                        second: Box::new(SplitNode::Leaf {
+                            pane: PaneId("C".to_string())
+                        }),
+                    }),
+                }
+            );
+        }
     }
 
     #[test]
