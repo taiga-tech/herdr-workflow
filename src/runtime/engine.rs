@@ -179,6 +179,8 @@ struct LiveAttempt {
     stop: Option<StopKind>,
     signaled_at: Option<Instant>,
     killed: bool,
+    /// 停止信号を送った時点の子孫(グループ外へ移ったものを含む)。
+    descendants: Vec<ProcessIdentity>,
     probe_cancel: Arc<AtomicBool>,
     probe_interval: Arc<AtomicU64>,
     want_lines: Arc<AtomicBool>,
@@ -584,6 +586,7 @@ impl<'r> Engine<'r> {
                 }
                 live_attempt.stop.get_or_insert(kind);
                 live_attempt.signaled_at = Some(now);
+                live_attempt.descendants = process::descendants(live_attempt.handle.pid());
                 live_attempt.probe_cancel.store(true, Ordering::Relaxed);
                 live_attempt.handle.signal_group(libc::SIGTERM);
                 slot.runtime.state = TaskState::Stopping;
@@ -1117,6 +1120,7 @@ impl<'r> Engine<'r> {
             stop: None,
             signaled_at: None,
             killed: false,
+            descendants: Vec::new(),
             probe_cancel,
             probe_interval,
             want_lines,
@@ -1282,6 +1286,21 @@ impl<'r> Engine<'r> {
         live.probe_cancel.store(true, Ordering::Relaxed);
         drop(live.guards);
         slot.pending_stop = None;
+        // T26: 停止時に記録した子孫のうち、まだ同一と照合できるものを止めて報告する。
+        let survivors: Vec<u32> = live
+            .descendants
+            .iter()
+            .filter(|identity| process::signal_if_same(identity, libc::SIGKILL))
+            .map(|identity| identity.pid)
+            .collect();
+        let survivor_notice = (!survivors.is_empty()).then(|| {
+            format!(
+                "[{}] killed {} descendant process(es) left outside the process group: {:?}",
+                task.0,
+                survivors.len(),
+                survivors
+            )
+        });
 
         let stop = live.stop;
         let lifecycle = slot.prepared.lifecycle;
@@ -1387,6 +1406,9 @@ impl<'r> Engine<'r> {
         );
         self.dirty = true;
         self.notice(message);
+        if let Some(notice) = survivor_notice {
+            self.notice(notice);
+        }
     }
 }
 

@@ -164,6 +164,93 @@ fn compare_with_boot(
     }
 }
 
+/// `/proc/<pid>/stat`の親PID(4番目)。
+#[cfg(target_os = "linux")]
+fn parent_pid(stat: &str) -> Option<u32> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// 終了済みで回収待ちのプロセスか(Linuxのみ判定し、他は`false`)。
+fn is_zombie(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| {
+                let rest = stat[stat.rfind(')')? + 1..].to_string();
+                rest.split_whitespace().next().map(|state| state == "Z")
+            })
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+/// `root`の子孫プロセス(自身を含まない)の識別情報。Linux以外では空を返す。
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn descendants(root: u32) -> Vec<ProcessIdentity> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut parents = Vec::new();
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            && let Some(ppid) = parent_pid(&stat)
+        {
+            parents.push((pid, ppid));
+        }
+    }
+    let mut found = Vec::new();
+    let mut frontier = vec![root];
+    while let Some(parent) = frontier.pop() {
+        for (pid, ppid) in &parents {
+            if *ppid == parent
+                && !found
+                    .iter()
+                    .any(|known: &ProcessIdentity| known.pid == *pid)
+            {
+                if let Some(identity) = observe(*pid) {
+                    found.push(identity);
+                }
+                frontier.push(*pid);
+            }
+        }
+    }
+    found
+}
+
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+pub fn descendants(_root: u32) -> Vec<ProcessIdentity> {
+    Vec::new()
+}
+
+/// 記録した識別情報と一致する場合だけ、そのPIDへ信号を送る。
+pub fn signal_if_same(identity: &ProcessIdentity, signal: libc::c_int) -> bool {
+    if compare(identity, observe(identity.pid).as_ref()) != IdentityMatch::Same
+        || is_zombie(identity.pid)
+    {
+        return false;
+    }
+    let Ok(pid) = libc::pid_t::try_from(identity.pid) else {
+        return false;
+    };
+    // SAFETY: 直前に起動時刻・グループ・ブート識別子を照合したプロセスへ送る。
+    unsafe { libc::kill(pid, signal) == 0 }
+}
+
 /// 起動済みプロセスへの信号送信口。回収前に限りグループへ送る。
 #[derive(Debug, Clone)]
 pub struct ProcessHandle {

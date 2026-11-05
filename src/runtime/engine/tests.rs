@@ -599,3 +599,50 @@ fn monitor_marks_service_unready_after_threshold() {
     assert_eq!(state(&report, "tests"), TaskState::Cancelled);
     assert_eq!(report.snapshot.outcome, RunOutcome::Failed);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stop_reports_and_kills_descendants_that_left_the_group() {
+    // T26: グループ外へ移った子孫も、停止時に記録して照合できれば止めて報告する。
+    let fixture = Fixture::new();
+    let yaml = workflow(
+        "",
+        &service(
+            "server",
+            "python3 -c \"import os,time; os.setsid(); open(os.environ[\\\"WORK\\\"]+\\\"/escaped\\\",\\\"w\\\").write(str(os.getpid())); time.sleep(60)\" & echo ready; exec sleep 60",
+            "    waitFor:\n      type: log\n      pattern: ready\n      timeoutSeconds: 10\n    stop:\n      graceSeconds: 1\n",
+        ),
+    );
+    let (tx, rx) = mpsc::channel();
+    let work = fixture.work();
+    let stopper = std::thread::spawn(move || {
+        for _ in 0..100 {
+            if work.join("escaped").exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = tx.send(Control::StopAll);
+    });
+    let (report, recorder) = run_with(&fixture, &yaml, None, no_secrets(), Some(rx));
+    stopper.join().unwrap();
+    assert_eq!(report.snapshot.phase, RunPhase::Stopped);
+    let pid: u32 = std::fs::read_to_string(fixture.work().join("escaped"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(
+        recorder
+            .notices
+            .iter()
+            .any(|notice| notice.contains("descendant")),
+        "{:?}",
+        recorder.notices
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    // 終了済み(回収待ちのゾンビを含む)で、稼働していない。
+    let state = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+    assert!(state.is_empty() || state.contains(") Z"), "{state}");
+}
