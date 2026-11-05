@@ -343,7 +343,7 @@ fn validate_wait_for(task_id: &TaskId, wait_for: &WaitFor) -> Result<(), Validat
             }
             // 値置換を含む文字列は置換後にsubstitute_allで検査する。
             if let PortValue::Number(number) = port
-                && !(1..=65535).contains(number)
+                && !(1_i64..=65_535).contains(number)
             {
                 return Err(ValidateError::InvalidTcpPort {
                     path: format!("tasks.{}.waitFor.port", task_id.0),
