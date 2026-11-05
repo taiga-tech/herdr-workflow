@@ -223,6 +223,8 @@ struct StartParams {
     plugin_config: Option<Value>,
     #[serde(default)]
     bootstrap_only: bool,
+    #[serde(default)]
+    herdr: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,6 +262,7 @@ fn env_map(env: &BTreeMap<String, String>) -> engine::EnvMap {
 
 struct StartSpec {
     bootstrap_only: bool,
+    herdr: bool,
     record: RunRecord,
     workflow: String,
     plugin_config: PluginConfig,
@@ -269,36 +272,266 @@ struct StartSpec {
 }
 
 /// 設定を検証して実行構成を作り、受付を保存してからエンジンを開始する。
-fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBody> {
-    let spec = load::load_str(&start.workflow).map_err(|error| ErrorBody {
+fn invalid(error: impl std::fmt::Display) -> ErrorBody {
+    ErrorBody {
         code: "invalid-config".to_string(),
         message: error.to_string(),
-    })?;
+    }
+}
+
+fn herdr_error(error: impl std::fmt::Display) -> ErrorBody {
+    ErrorBody {
+        code: "herdr".to_string(),
+        message: error.to_string(),
+    }
+}
+
+/// Herdrによる画面構築とAgent起動(@layout.create)。初期化の成功後に一度だけ呼ばれる。
+#[allow(clippy::too_many_arguments)]
+fn layout_hook(
+    socket: PathBuf,
+    workspace_id: String,
+    spec: crate::config::model::WorkflowSpec,
+    plan_workspace: crate::plan::compile::PlannedWorkspace,
+    labels: BTreeMap<String, String>,
+    checkout: PathBuf,
+    run_id: String,
+    state_root: PathBuf,
+    agents: Vec<TaskId>,
+) -> engine::InitHook {
+    Box::new(move || {
+        use crate::config::model::PaneView;
+        use crate::herdr::{self, HerdrClient, PaneSpec};
+        let exe = std::env::var_os("HERDR_WORKFLOW_BIN")
+            .map(PathBuf::from)
+            .map_or_else(std::env::current_exe, Ok)
+            .map_err(|error| error.to_string())?;
+        let exe = exe.display().to_string();
+        let mut client = HerdrClient::new(socket);
+        let mut summary = Vec::new();
+        for (tab, planned) in spec.workspace.tabs.iter().zip(&plan_workspace.tabs) {
+            let mut panes = BTreeMap::new();
+            let mut agent_panes = Vec::new();
+            for pane in &tab.panes {
+                let label = labels
+                    .get(&format!(
+                        "workspace.tabs.{}.panes.{}.label",
+                        tab.id.0, pane.id.0
+                    ))
+                    .cloned()
+                    .unwrap_or_else(|| pane.label.clone());
+                let follow = |args: &[&str]| {
+                    let mut command = vec![exe.clone()];
+                    command.extend(args.iter().map(|arg| (*arg).to_string()));
+                    Some(command)
+                };
+                let command = match &pane.view {
+                    PaneView::Logs { task } => {
+                        follow(&["logs", &run_id, "--task", &task.0, "--follow"])
+                    }
+                    PaneView::Status => follow(&["status", &run_id, "--watch"]),
+                    PaneView::Agent { task } => {
+                        agent_panes.push((pane.id.clone(), task.clone()));
+                        None
+                    }
+                    PaneView::Shell => None,
+                };
+                panes.insert(
+                    pane.id.clone(),
+                    PaneSpec {
+                        label,
+                        cwd: checkout.clone(),
+                        command,
+                        env: BTreeMap::from([(
+                            state_dir::STATE_DIR_ENV.to_string(),
+                            state_root.display().to_string(),
+                        )]),
+                    },
+                );
+            }
+            let tab_label = labels
+                .get(&format!("workspace.tabs.{}.label", tab.id.0))
+                .cloned()
+                .unwrap_or_else(|| tab.label.clone());
+            let ids = herdr::apply_layout(
+                &mut client,
+                &workspace_id,
+                &tab_label,
+                &planned.layout.root,
+                &panes,
+            )
+            .map_err(|error| error.to_string())?;
+            summary.push(format!("tab {} ({} panes)", tab.id.0, ids.len()));
+            for (pane, task) in agent_panes {
+                if !agents.contains(&task) {
+                    continue;
+                }
+                let Some(pane_id) = ids.get(&pane) else {
+                    continue;
+                };
+                let kind = match spec.tasks.get(&task) {
+                    Some(crate::config::model::TaskDef::Agent { agent, .. }) => {
+                        serde_json::to_value(agent.kind)
+                            .ok()
+                            .and_then(|value| value.as_str().map(str::to_string))
+                            .unwrap_or_default()
+                    }
+                    _ => continue,
+                };
+                // プロンプトは送らない(設定で明示した場合のみ。初期版は起動だけ)。
+                herdr::start_agent(&mut client, &herdr::agent_name(&task.0), &kind, pane_id)
+                    .map_err(|error| error.to_string())?;
+                summary.push(format!("agent {} started in {pane_id}", task.0));
+            }
+        }
+        let tokens = BTreeMap::from([("flow_state".to_string(), "active".to_string())]);
+        if let Err(error) = herdr::report_metadata(&mut client, &workspace_id, &tokens) {
+            summary.push(format!("metadata not reported: {error}"));
+        }
+        Ok(format!("@layout.create: {}", summary.join(", ")))
+    })
+}
+
+/// `RunRequest`の材料(借用の寿命を呼び出し側に揃えるため所有値で持つ)。
+struct OwnedRequest<'a> {
+    spec: &'a crate::config::model::WorkflowSpec,
+    inputs: &'a BTreeMap<InputId, String>,
+    checkout: PathBuf,
+    target: Option<TaskId>,
+    bootstrap_only: bool,
+    herdr: bool,
+    plugin_config: &'a PluginConfig,
+    env: &'a BTreeMap<String, String>,
+    config_dir: Option<PathBuf>,
+}
+
+impl OwnedRequest<'_> {
+    fn as_request(&self) -> RunRequest<'_> {
+        RunRequest {
+            spec: self.spec,
+            plugin_config: self.plugin_config,
+            inputs: self.inputs,
+            checkout: &self.checkout,
+            target: self.target.clone(),
+            bootstrap_only: self.bootstrap_only,
+            herdr: self.herdr,
+            base_env: env_map(self.env),
+            load_secrets: load_secrets_from_env(self.env),
+            config_dir: self.config_dir.clone(),
+        }
+    }
+}
+
+fn run_request<'a>(
+    spec: &'a crate::config::model::WorkflowSpec,
+    inputs: &'a BTreeMap<InputId, String>,
+    checkout: PathBuf,
+    start: &'a StartSpec,
+) -> OwnedRequest<'a> {
+    OwnedRequest {
+        spec,
+        inputs,
+        checkout,
+        target: start.record.target.clone().map(TaskId),
+        bootstrap_only: start.bootstrap_only,
+        herdr: start.herdr,
+        plugin_config: &start.plugin_config,
+        env: &start.env,
+        config_dir: start.record.config_path.parent().map(Path::to_path_buf),
+    }
+}
+
+fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBody> {
+    let spec = load::load_str(&start.workflow).map_err(invalid)?;
     let inputs: BTreeMap<InputId, String> = start
         .record
         .inputs
         .iter()
         .map(|(key, value)| (InputId(key.clone()), value.clone()))
         .collect();
+    let mut start = start;
+    let mut workspace_id = start
+        .env
+        .get("HERDR_WORKSPACE_ID")
+        .filter(|id| !id.is_empty())
+        .cloned();
+    let socket = start
+        .env
+        .get("HERDR_SOCKET_PATH")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    let mut labels = BTreeMap::new();
+    if start.herdr {
+        let socket = socket
+            .clone()
+            .ok_or_else(|| herdr_error(crate::herdr::HerdrError::NoSocket))?;
+        // 外部操作の前に、作成元のcheckoutで設定・入力・秘密値を検証する。
+        let checkout = start.record.checkout.clone();
+        session::prepare_run(
+            run_request(&spec, &inputs, checkout, &start).as_request(),
+            start.record.run_id.clone(),
+        )
+        .map_err(invalid)?;
+        let resolved =
+            crate::config::substitute::resolve_inputs(&spec, &inputs).map_err(invalid)?;
+        labels = crate::config::substitute::substitute_all(&spec, &resolved)
+            .map_err(invalid)?
+            .0;
+        if start.is_new && spec.worktree.mode == crate::config::model::WorktreeMode::Create {
+            let branch = labels
+                .get("worktree.branch")
+                .cloned()
+                .ok_or_else(|| invalid("worktree.branch is required for worktree.mode: create"))?;
+            let repo_dir = start
+                .record
+                .config_path
+                .parent()
+                .map_or_else(|| start.record.checkout.clone(), Path::to_path_buf);
+            let repo = crate::approval::repo_key(&repo_dir);
+            // 自分の作成要求から届くworktree.createdを別Runとして扱わない(T12)。
+            if let Ok(store) = Store::open(&shared.state.db_path()) {
+                let _ = store.accept_once(&format!("pending:{repo}:{branch}"), None);
+            }
+            let mut client = crate::herdr::HerdrClient::new(socket);
+            let label = labels
+                .get("workspace.label")
+                .cloned()
+                .unwrap_or_else(|| branch.clone());
+            let created = crate::herdr::create_worktree(
+                &mut client,
+                &repo_dir,
+                &branch,
+                labels.get("worktree.base").map(String::as_str),
+                &label,
+            )
+            .map_err(herdr_error)?;
+            start.record.checkout = created.path;
+            workspace_id = Some(created.workspace_id);
+        }
+    }
+    let checkout = start.record.checkout.clone();
     let mut prepared = session::prepare_run(
-        RunRequest {
-            spec: &spec,
-            plugin_config: &start.plugin_config,
-            inputs: &inputs,
-            checkout: &start.record.checkout,
-            target: start.record.target.clone().map(TaskId),
-            bootstrap_only: start.bootstrap_only,
-            base_env: env_map(&start.env),
-            load_secrets: load_secrets_from_env(&start.env),
-            config_dir: start.record.config_path.parent().map(Path::to_path_buf),
-        },
+        run_request(&spec, &inputs, checkout, &start).as_request(),
         start.record.run_id.clone(),
     )
-    .map_err(|error| ErrorBody {
-        code: "invalid-config".to_string(),
-        message: error.to_string(),
-    })?;
-    prepared.config.initial = start.initial;
+    .map_err(invalid)?;
+    prepared.config.initial = std::mem::take(&mut start.initial);
+    if start.herdr {
+        let workspace_id = workspace_id.ok_or_else(|| {
+            herdr_error("HERDR_WORKSPACE_ID is not set; run inside a Herdr workspace")
+        })?;
+        prepared.config.on_init_complete = Some(layout_hook(
+            socket.clone().unwrap_or_default(),
+            workspace_id,
+            spec.clone(),
+            prepared.config.plan.workspace.clone(),
+            labels,
+            prepared.checkout.clone(),
+            start.record.run_id.clone(),
+            shared.state.root().to_path_buf(),
+            prepared.agents.clone(),
+        ));
+    }
 
     let mut store = Store::open(&shared.state.db_path()).map_err(|error| ErrorBody {
         code: "store".to_string(),
@@ -475,6 +708,7 @@ fn handle_start(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody>
             initial: BTreeMap::new(),
             is_new: true,
             bootstrap_only: params.bootstrap_only,
+            herdr: params.herdr,
         },
     )
 }
@@ -549,6 +783,7 @@ fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody
             initial,
             is_new: false,
             bootstrap_only: false,
+            herdr: false,
         },
     )
 }
@@ -952,6 +1187,89 @@ pub fn current_env() -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn herdr_up_creates_worktree_then_layout_and_agent_after_initialization() {
+        use crate::herdr::fake::FakeHerdr;
+        use crate::runtime::git::test_repo::{init, run};
+        use crate::runtime::state_dir::test_support::TempDir;
+
+        let tmp = TempDir::new("coord-herdr");
+        let repo = init(&tmp.0.join("repo"));
+        std::fs::create_dir_all(repo.join(".herdr")).unwrap();
+        let workflow = "version: 1\nname: t\ninputs:\n  branch:\n    type: string\n    required: true\nworktree:\n  mode: create\n  branch: '${inputs.branch}'\n  base: main\nbootstrap:\n  targets: [init]\ntasks:\n  init:\n    type: command\n    lifecycle: job\n    runner: supervised\n    argv: [/bin/sh, -c, 'touch initialized']\n  developer:\n    type: agent\n    agent:\n      kind: claude\n    dependsOn:\n      - task: init\n        condition: succeeded\nworkspace:\n  label: '${inputs.branch}'\n  tabs:\n    - id: dev\n      label: dev\n      layout: { type: grid, columns: 2, rows: 1 }\n      panes:\n        - id: L\n          label: init\n          view: { type: logs, task: init }\n          placement: { column: 1, row: 1 }\n        - id: A\n          label: developer\n          view: { type: agent, task: developer }\n          placement: { column: 2, row: 1 }\n";
+        let config = repo.join(".herdr/workflow.yaml");
+        std::fs::write(&config, workflow).unwrap();
+        // Herdrが作るはずのcheckoutを先に用意し、偽Herdrはそのパスを返す。
+        run(
+            &repo,
+            &["worktree", "add", "-q", "-b", "feature/x", "../wt"],
+        );
+        let wt = std::fs::canonicalize(tmp.0.join("wt")).unwrap();
+        let socket = PathBuf::from(format!("/tmp/hwf-{}.sock", std::process::id()));
+        let fake = FakeHerdr::start(socket.clone(), wt.clone());
+
+        let shared = Arc::new(Shared {
+            state: StateDir::open(tmp.0.join("state")).unwrap(),
+            runs: Mutex::new(HashMap::new()),
+            last_activity: Mutex::new(Instant::now()),
+            shutdown: AtomicBool::new(false),
+        });
+        let mut env = current_env();
+        env.insert(
+            "HERDR_SOCKET_PATH".to_string(),
+            socket.display().to_string(),
+        );
+        env.remove("HERDR_WORKSPACE_ID");
+        let result = handle_start(
+            &shared,
+            json!({
+                "configPath": config,
+                "workflow": workflow,
+                "inputs": [["branch", "feature/x"]],
+                "checkout": repo,
+                "target": null,
+                "env": env,
+                "herdr": true,
+            }),
+        )
+        .unwrap();
+        let run_id = result["runId"].as_str().unwrap().to_string();
+        let store = Store::open(&shared.state.db_path()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let record = store.run(&run_id).unwrap();
+            if matches!(record.phase, RunPhase::Finished | RunPhase::Stopped) {
+                assert_eq!(record.outcome, RunOutcome::Succeeded);
+                assert_eq!(record.checkout, wt);
+                break;
+            }
+            assert!(Instant::now() < deadline, "run did not finish");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(wt.join("initialized").exists());
+        let methods = fake.methods();
+        assert_eq!(
+            methods,
+            [
+                "worktree.create",
+                "layout.apply",
+                "agent.start",
+                "workspace.report_metadata"
+            ]
+        );
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests[0]["params"]["branch"], "feature/x");
+        assert_eq!(requests[1]["params"]["workspace_id"], "w9");
+        let log_pane = &requests[1]["params"]["root"]["first"];
+        assert_eq!(log_pane["command"][1], "logs");
+        assert_eq!(requests[2]["params"]["name"], "developer");
+        assert_eq!(requests[2]["params"]["kind"], "claude");
+        // 自分の作成要求は保留記録で識別でき、イベントで別Runを増やさない(T12)。
+        let repo_key = crate::approval::repo_key(&repo);
+        assert!(store.acceptance_exists(&format!("pending:{repo_key}:feature/x")));
+        let _ = std::fs::remove_file(socket);
+    }
 
     #[test]
     fn long_socket_paths_are_rejected() {

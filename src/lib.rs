@@ -3,6 +3,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod coordinator;
+pub mod herdr;
 pub mod plan;
 pub mod runtime;
 pub mod state;

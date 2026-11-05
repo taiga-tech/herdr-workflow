@@ -66,6 +66,8 @@ struct Args {
     timeout: Option<u64>,
     json: bool,
     follow: bool,
+    herdr: bool,
+    watch: bool,
     idle_exit: Option<u64>,
 }
 
@@ -115,6 +117,8 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--json" => parsed.json = true,
             "--follow" | "-f" => parsed.follow = true,
+            "--herdr" => parsed.herdr = true,
+            "--watch" => parsed.watch = true,
             other if other.starts_with("--") => return Err(format!("unknown flag {other:?}")),
             other => parsed.positional.push(other.to_string()),
         }
@@ -291,6 +295,7 @@ fn start_main(state: &StateDir, args: &Args, follow: bool) -> i32 {
         "target": args.target,
         "env": coordinator::current_env(),
         "pluginConfig": plugin_config,
+        "herdr": args.herdr,
     });
     let result = match client.call("run.start", params) {
         Ok(result) => result,
@@ -585,13 +590,31 @@ fn status_main(state: &StateDir, args: &Args) -> i32 {
                 return EXIT_FAILED;
             }
         };
-        let tasks = store.tasks(run_id).unwrap_or_default();
-        if args.json {
-            println!("{}", status_json(&run, &tasks));
-        } else {
-            print!("{}", render_status(&run, &tasks));
+        let mut run = run;
+        loop {
+            let tasks = store.tasks(run_id).unwrap_or_default();
+            if args.json {
+                println!("{}", status_json(&run, &tasks));
+            } else {
+                if args.watch {
+                    // 画面を消してから再描画する(端末制御はこの2つだけ)。
+                    print!("\x1b[2J\x1b[H");
+                }
+                print!("{}", render_status(&run, &tasks));
+            }
+            let _ = std::io::stdout().flush();
+            if !args.watch || is_done(run.phase) {
+                return EXIT_OK;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+            match store.run(run_id) {
+                Ok(latest) => run = latest,
+                Err(error) => {
+                    eprint_error(args.json, "store", &error.to_string());
+                    return EXIT_FAILED;
+                }
+            }
         }
-        return EXIT_OK;
     }
     let runs = store.recent_runs(20).unwrap_or_default();
     if args.json {
@@ -941,6 +964,14 @@ fn hook_main(state: &StateDir, args: &Args) -> i32 {
     let hash = crate::approval::config_hash(&text, &plugin_config);
     let repo = crate::approval::repo_key(&primary);
     let key = crate::approval::acceptance_key(&checkout, &spec.name, &hash);
+    // `up --herdr`が作成要求したworktreeのイベントは、そのRunへ関連づけて別Runを増やさない(T12)。
+    if let Some(branch) = &event.branch
+        && Store::open(&state.db_path())
+            .is_ok_and(|store| store.acceptance_exists(&format!("pending:{repo}:{branch}")))
+    {
+        println!("worktree was created by herdr-workflow up; not started again");
+        return EXIT_OK;
+    }
     let store = match Store::open(&state.db_path()) {
         Ok(store) => store,
         Err(error) => {

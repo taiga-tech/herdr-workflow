@@ -80,7 +80,12 @@ pub struct RunConfig {
     pub checkout_lock: Option<String>,
     /// 再開・再試行時に引き継ぐTaskの状態と説明。ないTaskは未実行から始める。
     pub initial: BTreeMap<TaskId, (TaskRuntimeState, Option<String>)>,
+    /// 初期化の成功後、初期化対象でないタスクを起動する前に一度だけ呼ぶ(画面構築)。
+    pub on_init_complete: Option<InitHook>,
 }
+
+/// 画面構築等の処理。成功時は通知文を返し、失敗するとRunを失敗として停止する。
+pub type InitHook = Box<dyn FnOnce() -> Result<String, String> + Send>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -260,6 +265,7 @@ pub struct Engine<'r> {
     stopping_all: Option<StopKind>,
     store_degraded: bool,
     checkout_guard: Vec<LockGuard>,
+    init_hook: Option<InitHook>,
     dirty: bool,
 }
 
@@ -276,6 +282,8 @@ impl<'r> Engine<'r> {
         recorder: &'r mut dyn Recorder,
         control: Receiver<Control>,
     ) -> Self {
+        let mut config = config;
+        let init_hook = config.on_init_complete.take();
         let (events_tx, events_rx) = mpsc::channel();
         let slots = config
             .tasks
@@ -319,6 +327,7 @@ impl<'r> Engine<'r> {
             stopping_all: None,
             store_degraded: false,
             checkout_guard: Vec::new(),
+            init_hook,
             dirty: true,
         }
     }
@@ -734,9 +743,23 @@ impl<'r> Engine<'r> {
         if self.store_degraded {
             return;
         }
+        let init_pending = !self.init_done();
+        if !init_pending
+            && !self.init_failed()
+            && let Some(hook) = self.init_hook.take()
+        {
+            match hook() {
+                Ok(message) => self.notice(message),
+                Err(message) => {
+                    self.notice(format!("@layout.create failed: {message}"));
+                    self.outcome = RunOutcome::Failed;
+                    self.request_stop_all(StopKind::DependencyLost);
+                    return;
+                }
+            }
+        }
         let states = self.states();
         let runnable = schedule::runnable_tasks(&self.config.plan, &states);
-        let init_pending = !self.init_done();
         for id in runnable {
             let Some(slot) = self.slots.get(&id) else {
                 continue;

@@ -39,6 +39,10 @@ pub enum SessionError {
     HeadlessAgent(String),
     #[error(transparent)]
     Git(#[from] git::GitError),
+    #[error(
+        "agent task {task:?} depends on {dependency:?}, which is not a bootstrap task; agents start when the layout is created after initialization"
+    )]
+    AgentDependency { task: String, dependency: String },
     #[error("checkout {path} is not usable: {message}")]
     Checkout { path: PathBuf, message: String },
 }
@@ -55,6 +59,8 @@ pub struct RunRequest<'a> {
     pub target: Option<TaskId>,
     /// 自動受付の初期化だけを行う(`bootstrap.targets`とその依存先)。
     pub bootstrap_only: bool,
+    /// Herdr連携で実行する。AgentタスクはHerdrの画面構築時に起動する。
+    pub herdr: bool,
     pub base_env: EnvMap,
     /// 秘密値定義の読み込み口(Run開始時とAttempt起動直前に呼ぶ)。
     pub load_secrets: SecretsLoader,
@@ -115,6 +121,8 @@ pub struct PreparedRun {
     pub files: Option<(crate::config::model::FilesConfig, PathBuf)>,
     /// `attach`で採用した借用checkout。後片付けで削除しない。
     pub borrowed: bool,
+    /// Herdr連携で起動するAgentタスク。
+    pub agents: Vec<TaskId>,
 }
 
 /// checkout実行ロックの名前(正規化したパスのハッシュ)。
@@ -179,11 +187,30 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
     };
 
     let selected = select_tasks(&plan, request.target.as_ref(), request.bootstrap_only);
+    let mut agents = Vec::new();
     for id in &selected {
         if plan.tasks[id].kind == PlannedTaskKind::Agent {
-            return Err(SessionError::HeadlessAgent(id.0.clone()));
+            if !request.herdr {
+                return Err(SessionError::HeadlessAgent(id.0.clone()));
+            }
+            // Agentは画面構築時(初期化の成功後)に起動するため、依存先は初期化対象に限る。
+            if let Some(dependency) = plan.tasks[id]
+                .depends_on
+                .iter()
+                .find(|dependency| !plan.init_boundary.contains(&dependency.task))
+            {
+                return Err(SessionError::AgentDependency {
+                    task: id.0.clone(),
+                    dependency: dependency.task.0.clone(),
+                });
+            }
+            agents.push(id.clone());
         }
     }
+    let selected: BTreeSet<TaskId> = selected
+        .into_iter()
+        .filter(|id| plan.tasks[id].kind != PlannedTaskKind::Agent)
+        .collect();
 
     let mut tasks = BTreeMap::new();
     for id in &selected {
@@ -222,6 +249,7 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         load_secrets: Box::new(move || load_secrets()),
         checkout_lock: Some(checkout_lock_name(&checkout)),
         initial: BTreeMap::new(),
+        on_init_complete: None,
     };
     Ok(PreparedRun {
         config,
@@ -229,6 +257,7 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         checkout,
         files,
         borrowed,
+        agents,
     })
 }
 

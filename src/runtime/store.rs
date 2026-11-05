@@ -371,6 +371,19 @@ impl Store {
         Ok(inserted == 1)
     }
 
+    pub fn acceptance_exists(&self, key: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM acceptances WHERE key = ?1",
+                params![key],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
     /// 保留していた受付を、承認後の再受付のために取り除く。
     pub fn release_held(&self, key: &str) -> Result<(), StoreError> {
         self.conn.execute(

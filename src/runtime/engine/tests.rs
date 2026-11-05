@@ -75,6 +75,7 @@ fn run_with(
             load_secrets: loader,
             config_dir: None,
             bootstrap_only: false,
+            herdr: false,
         },
         session::new_run_id(),
     )
@@ -475,6 +476,7 @@ fn undefined_secret_fails_before_any_process_starts() {
             load_secrets: no_secrets(),
             config_dir: None,
             bootstrap_only: false,
+            herdr: false,
         },
         session::new_run_id(),
     )
