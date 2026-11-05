@@ -50,7 +50,7 @@ updated: '2026-09-16'
 
 段階Bの非対話実行を`src/runtime/`・`src/coordinator.rs`・`src/commands.rs`に実装した。job/serviceの起動と停止(プロセスグループ、猶予後の強制終了、依存の逆順)、readiness(http・tcp・log)とmonitor、期限切れ、jobだけの再試行、失敗伝播と依存喪失時の停止、job・serviceの実行枠、resource lockとcheckout実行ロック、秘密値の解決とログのマスク、Attemptごとのログ、SQLiteの状態ストア、Coordinatorの制御ソケットと再起動時の照合、CLIの`run`・`up`・`wait`・`status`・`logs`・`stop`・`resume`・`retry`・`doctor`がある。Herdrを使わない実プロセスの試験(`src/runtime/engine/tests.rs`・`tests/cli_runtime.rs`)で、T04〜T09、T15、T34〜T36、T38に対応する動作を確認している。TaskRunnerは別プロセスではなくCoordinator内のスレッドであり、[ADR-0002](../decisions/0002-coordinator-runner.md)の分離は実装していない。
 
-段階C・Dのうち、Herdrを必要としない部分として、`attach`のGit照合(T37)、`files.copy`(T22・T23)、承認と`worktree.created`イベントの受付(T11・T24・T25)、`cleanup plan`と削除の保留(T27)を実装した。イベントの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認した範囲に限り、Herdr実機では試験していない。Herdr連携として、`up --herdr`によるworktree作成、初期化後の`layout.apply`による配置、ログ・状態pane、`agent.start`、メタデータ報告、所有worktreeの`remove`を実装した。Herdr実機では試験しておらず、Agentの観測値の追跡、再接続時の照合、resume時のpane照合は未実装である。
+段階C・Dのうち、Herdrを必要としない部分として、`attach`のGit照合(T37)、`files.copy`(T22・T23)、承認と`worktree.created`イベントの受付(T11・T24・T25)、`cleanup plan`と削除の保留(T27)を実装した。イベントの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認した範囲に限り、Herdr実機では試験していない。Herdr連携として、`up --herdr`によるworktree作成、初期化後の`layout.apply`による配置、ログ・状態pane、`agent.start`、メタデータ報告、所有worktreeの`remove`を実装した。Agentの観測値は`agent.get`で追跡し、`idle`等をTaskの成功へ変換しない(T10)。Herdr実機では試験しておらず、再接続時の照合、resume時のpane照合は未実装である。
 
 ## 関連文書
 

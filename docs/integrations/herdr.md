@@ -64,8 +64,9 @@ developer     running     ready      observed: idle
 2. 初期化対象のjobが成功した後、設定のtabごとに`layout.apply`(`workspace_id`、`tab_label`、`focus: false`、`root`)を送る。`tab_id`は渡さず、既存のtabを置換しない。分割木の比率は`firstSpan / totalSpan`とする。ログpaneは`herdr-workflow logs RUN --task TASK --follow`、状態paneは`herdr-workflow status RUN --watch`を`command`として起動し、Shell・Agentのpaneはコマンドなしのshellとする。応答の`layout.root`の葉の順序で設定のpane IDとHerdrのpane IDを対応づける。
 3. Agent paneでは`agent.start`(`name`、`kind`、`pane_id`)を送る。プロンプトは送らない。Agentの依存先は初期化対象に限る。
 4. `workspace.report_metadata`で`flow_state`を報告する(失敗しても実行は続ける)。
+5. 起動したAgentごとに`agent.get`(`target`はAgent名)を一定間隔で送り、応答の`agent.agent_status`(`idle`・`working`・`blocked`・`done`・`unknown`)を観測値として記録する。エラーコードに`not_found`を含む応答はAgentの終了または置換とみなして追跡を終え、それ以外の失敗は観測値を`unknown`にする。照会間隔は既定2秒で、診断のために要求元の環境変数`HERDR_WORKFLOW_AGENT_POLL_MS`で変えられる。
 
-応答を失った変更要求は再送しない。これらの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認したものであり、偽のHerdrソケットを使う試験(`src/herdr.rs`・`src/coordinator.rs`)で要求形を確認している。Herdr実機、Agentの観測値(`idle`等)の取得、再接続時の照合(T17)は未実装・未試験である。
+応答を失った変更要求は再送しない。これらの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認したものであり、偽のHerdrソケットを使う試験(`src/herdr.rs`・`src/coordinator.rs`)で要求形を確認している。Herdr実機での動作は未試験であり、再接続時のpane照合(T17)とAgentを含むRunの`resume`・`retry`は未実装である。Coordinatorを再起動すると、Agentタスクは追跡が切れたものとして`stopped`になる。
 
 ## 互換性の記録
 
