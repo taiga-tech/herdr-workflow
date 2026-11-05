@@ -1067,12 +1067,28 @@ fn cleanup_review(
     if !live.is_empty() {
         holds.push(format!("tasks may still be running: {}", live.join(", ")));
     }
-    // 本プラグインがworktreeを作成した記録はまだないため、すべて借用として扱う。
-    holds.push(
-        "checkout is borrowed (not created by herdr-workflow); it is never removed".to_string(),
-    );
+    if run.owned_workspace.is_none() {
+        holds.push(
+            "checkout is borrowed (not created by herdr-workflow); it is never removed".to_string(),
+        );
+    }
     let info = crate::runtime::git::inspect(&run.checkout).ok();
     let changes = crate::runtime::git::changes(&run.checkout).ok();
+    if !run.checkout.exists() {
+        holds.push("checkout no longer exists; nothing to remove".to_string());
+    } else if let Some(changes) = &changes {
+        // ignore対象の.env等も消えるため、通常の変更一覧に出ないことを無変更とみなさない(T27)。
+        if !changes.is_clean() {
+            holds.push(format!(
+                "checkout has changes: {} tracked, {} untracked, {} ignored file(s)",
+                changes.tracked_changes.len(),
+                changes.untracked.len(),
+                changes.ignored.len()
+            ));
+        }
+    } else {
+        holds.push("cannot read the checkout state with git".to_string());
+    }
     if info
         .as_ref()
         .is_some_and(|info| info.primary.as_deref() == Some(info.toplevel.as_path()))
@@ -1087,6 +1103,7 @@ fn cleanup_review(
         "untracked": changes.as_ref().map(|c| c.untracked.clone()),
         "ignored": changes.as_ref().map(|c| c.ignored.clone()),
         "liveTasks": live,
+        "ownedWorkspace": run.owned_workspace,
     });
     Ok((run, holds, detail))
 }
@@ -1140,9 +1157,44 @@ fn remove_main(state: &StateDir, args: &Args) -> i32 {
             );
             EXIT_FAILED
         }
-        Ok(_) => {
-            eprint_error(args.json, "remove", "no owned worktree to remove");
-            EXIT_FAILED
+        Ok((run, _, _)) => {
+            // 確認後も削除直前に状態を読み直す(cleanup_reviewで再取得済み)。
+            let Some(workspace_id) = run.owned_workspace.clone() else {
+                eprint_error(args.json, "remove", "no owned worktree to remove");
+                return EXIT_FAILED;
+            };
+            let env = coordinator::current_env();
+            let mut client = match crate::herdr::HerdrClient::from_env(&env) {
+                Ok(client) => client,
+                Err(error) => {
+                    eprint_error(args.json, "remove", &error.to_string());
+                    return EXIT_CONNECTION;
+                }
+            };
+            // Herdrのworktree.removeは`git worktree remove`を実行し、ブランチは削除しない。
+            match client.request(
+                "worktree.remove",
+                json!({ "workspace_id": workspace_id, "force": false }),
+            ) {
+                Ok(_) => {
+                    if let Ok(store) = Store::open(&state.db_path()) {
+                        let _ = store.add_event(&run.run_id, "worktree removed (branch kept)");
+                    }
+                    if args.json {
+                        println!("{}", json!({ "ok": true, "removed": run.checkout }));
+                    } else {
+                        println!(
+                            "削除しました: {} (ブランチは残します)",
+                            run.checkout.display()
+                        );
+                    }
+                    EXIT_OK
+                }
+                Err(error) => {
+                    eprint_error(args.json, "remove", &error.to_string());
+                    EXIT_FAILED
+                }
+            }
         }
         Err(message) => {
             eprint_error(args.json, "remove", &message);

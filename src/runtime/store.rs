@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::engine::{Recorder, RunOutcome, RunPhase, RunSnapshot};
 use crate::runtime::logs;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -49,6 +49,8 @@ pub struct RunRecord {
     pub coordinator_pid: Option<u32>,
     /// Run開始時に固定したプラグイン全体設定(JSON)。
     pub plugin_config: String,
+    /// 本プラグインがHerdrへ作成を依頼したworkspace。`None`のcheckoutは借用として扱う。
+    pub owned_workspace: Option<String>,
 }
 
 pub struct Store {
@@ -151,14 +153,23 @@ impl Store {
                 COMMIT;",
             )?;
         }
+        if version < 3 {
+            // 版3: Herdr経由で作成したworkspace(所有するworktree)の記録。
+            conn.execute_batch(
+                "BEGIN;
+                ALTER TABLE runs ADD COLUMN owned_workspace TEXT;
+                PRAGMA user_version = 3;
+                COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
     pub fn insert_run(&self, record: &RunRecord) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO runs (id, created_at, updated_at, plan_hash, config_path, checkout, target,
-                phase, outcome, workflow, inputs, coordinator_pid, plugin_config)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 record.run_id,
                 record.created_at,
@@ -173,6 +184,7 @@ impl Store {
                 serde_json::to_string(&record.inputs).unwrap_or_default(),
                 record.coordinator_pid,
                 record.plugin_config,
+                record.owned_workspace,
             ],
         )?;
         Ok(())
@@ -232,6 +244,7 @@ impl Store {
                 inputs: serde_json::from_str(&inputs).unwrap_or_default(),
                 coordinator_pid: row.get(11)?,
                 plugin_config: row.get(12)?,
+                owned_workspace: row.get(13)?,
             },
             row.get(7)?,
             row.get(8)?,
@@ -245,7 +258,7 @@ impl Store {
         Ok(record)
     }
 
-    const RUN_COLUMNS: &'static str = "id, created_at, updated_at, plan_hash, config_path, checkout, target, phase, outcome, workflow, inputs, coordinator_pid, plugin_config";
+    const RUN_COLUMNS: &'static str = "id, created_at, updated_at, plan_hash, config_path, checkout, target, phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace";
 
     pub fn run(&self, run_id: &str) -> Result<RunRecord, StoreError> {
         let raw = self
@@ -442,6 +455,7 @@ mod tests {
             inputs: vec![("port".to_string(), "3001".to_string())],
             coordinator_pid: Some(1),
             plugin_config: String::new(),
+            owned_workspace: None,
         }
     }
 

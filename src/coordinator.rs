@@ -506,6 +506,7 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             )
             .map_err(herdr_error)?;
             start.record.checkout = created.path;
+            start.record.owned_workspace = Some(created.workspace_id.clone());
             workspace_id = Some(created.workspace_id);
         }
     }
@@ -697,6 +698,7 @@ fn handle_start(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody>
         inputs: params.inputs,
         coordinator_pid: Some(std::process::id()),
         plugin_config: serde_json::to_string(&plugin_config).unwrap_or_default(),
+        owned_workspace: None,
     };
     start_engine(
         shared,
@@ -1242,6 +1244,7 @@ mod tests {
             if matches!(record.phase, RunPhase::Finished | RunPhase::Stopped) {
                 assert_eq!(record.outcome, RunOutcome::Succeeded);
                 assert_eq!(record.checkout, wt);
+                assert_eq!(record.owned_workspace.as_deref(), Some("w9"));
                 break;
             }
             assert!(Instant::now() < deadline, "run did not finish");
