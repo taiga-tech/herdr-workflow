@@ -138,7 +138,7 @@
                 "env": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "string"
+                        "$ref": "#/$defs/EnvValue"
                     },
                     "default": {}
                 },
@@ -167,6 +167,20 @@
             },
             "additionalProperties": false,
             "required": ["task", "condition"]
+        },
+        "EnvValue": {
+            "description": "環境変数の値。文字列、秘密値参照、または`null`(継承した値の削除)。",
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "$ref": "#/$defs/SecretRef"
+                },
+                {
+                    "type": "null"
+                }
+            ]
         },
         "ExecutionConfig": {
             "type": "object",
@@ -339,6 +353,28 @@
                 }
             ]
         },
+        "LogStream": {
+            "type": "string",
+            "enum": ["stdout", "stderr", "any"]
+        },
+        "MonitorConfig": {
+            "description": "ready後の継続確認。両方のキーが必須。",
+            "type": "object",
+            "properties": {
+                "failureThreshold": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "intervalSeconds": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false,
+            "required": ["intervalSeconds", "failureThreshold"]
+        },
         "OnDependencyLost": {
             "type": "string",
             "enum": ["stop"]
@@ -468,6 +504,18 @@
             "additionalProperties": false,
             "required": ["column", "row"]
         },
+        "PortValue": {
+            "description": "TCPのポート番号。整数、または`${inputs.port}`等の値置換を含む文字列。",
+            "anyOf": [
+                {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                {
+                    "type": "string"
+                }
+            ]
+        },
         "PreserveOnlyPolicy": {
             "type": "string",
             "enum": ["preserve"]
@@ -476,9 +524,56 @@
             "type": "string",
             "enum": ["stop-owned"]
         },
+        "RetryConfig": {
+            "type": "object",
+            "properties": {
+                "delaySeconds": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "default": 0,
+                    "minimum": 0
+                },
+                "maxAttempts": {
+                    "description": "初回を含む総Attempt数。",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false,
+            "required": ["maxAttempts"]
+        },
         "RunnerKind": {
             "type": "string",
             "enum": ["supervised"]
+        },
+        "ScriptSpec": {
+            "description": "シェル経由で実行する本文。`shell`の末尾に`source`を一つの引数として追加して起動する。\nどちらにも`${...}`の値置換は行わない(docs/specs/execution.md#script)。",
+            "type": "object",
+            "properties": {
+                "shell": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "source": {
+                    "type": "string"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["shell", "source"]
+        },
+        "SecretRef": {
+            "description": "`$HERDR_PLUGIN_CONFIG_DIR/secrets.yaml`に定義した秘密値の名前だけを持つ。",
+            "type": "object",
+            "properties": {
+                "secret": {
+                    "type": "string"
+                }
+            },
+            "additionalProperties": false,
+            "required": ["secret"]
         },
         "StopConfig": {
             "type": "object",
@@ -524,7 +619,8 @@
                     "type": "object",
                     "properties": {
                         "argv": {
-                            "type": "array",
+                            "description": "`script`と排他で、どちらか一方が必須(意味検証で確認する)。",
+                            "type": ["array", "null"],
                             "items": {
                                 "type": "string"
                             }
@@ -539,12 +635,18 @@
                         "env": {
                             "type": "object",
                             "additionalProperties": {
-                                "type": "string"
+                                "$ref": "#/$defs/EnvValue"
                             },
                             "default": {}
                         },
                         "lifecycle": {
                             "$ref": "#/$defs/TaskLifecycle"
+                        },
+                        "locks": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "onDependencyLost": {
                             "anyOf": [
@@ -557,8 +659,28 @@
                             ],
                             "default": null
                         },
+                        "retry": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/RetryConfig"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
+                        },
                         "runner": {
                             "$ref": "#/$defs/RunnerKind"
+                        },
+                        "script": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/ScriptSpec"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
                         },
                         "stop": {
                             "anyOf": [
@@ -582,6 +704,7 @@
                             "const": "command"
                         },
                         "waitFor": {
+                            "description": "`TaskDef`の列挙子間の大きさの差を抑えるため箱に入れる。",
                             "anyOf": [
                                 {
                                     "$ref": "#/$defs/WaitFor"
@@ -594,7 +717,7 @@
                         }
                     },
                     "additionalProperties": false,
-                    "required": ["type", "lifecycle", "runner", "argv"]
+                    "required": ["type", "lifecycle", "runner"]
                 },
                 {
                     "type": "object",
@@ -638,6 +761,16 @@
                             "format": "uint64",
                             "minimum": 0
                         },
+                        "monitor": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/MonitorConfig"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
+                        },
                         "status": {
                             "type": "integer",
                             "format": "uint16",
@@ -666,6 +799,79 @@
                         "intervalMilliseconds",
                         "consecutiveSuccesses"
                     ]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "consecutiveSuccesses": {
+                            "type": "integer",
+                            "format": "uint32",
+                            "minimum": 0
+                        },
+                        "host": {
+                            "type": "string",
+                            "default": "127.0.0.1"
+                        },
+                        "intervalMilliseconds": {
+                            "type": "integer",
+                            "format": "uint64",
+                            "minimum": 0
+                        },
+                        "monitor": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/MonitorConfig"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
+                        },
+                        "port": {
+                            "$ref": "#/$defs/PortValue"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer",
+                            "format": "uint64",
+                            "minimum": 0
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "tcp"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "type",
+                        "port",
+                        "timeoutSeconds",
+                        "intervalMilliseconds",
+                        "consecutiveSuccesses"
+                    ]
+                },
+                {
+                    "description": "`monitor`を持たない。指定した場合は未知キーとして拒否する。",
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string"
+                        },
+                        "stream": {
+                            "$ref": "#/$defs/LogStream",
+                            "default": "any"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer",
+                            "format": "uint64",
+                            "minimum": 0
+                        },
+                        "type": {
+                            "type": "string",
+                            "const": "log"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["type", "pattern", "timeoutSeconds"]
                 }
             ]
         },
@@ -704,8 +910,8 @@
                     "default": null
                 },
                 "branch": {
-                    "description": "\"${inputs.branch}\" のような値置換は生文字列のまま保持する。置換処理は後続段階。",
-                    "type": "string"
+                    "description": "\"${inputs.branch}\" のような値置換は生文字列のまま保持する。置換処理は後続段階。\n`create`では必須、`attach`では省略可能(指定時は対象checkoutのブランチと照合する)。",
+                    "type": ["string", "null"]
                 },
                 "existingBranch": {
                     "anyOf": [
@@ -734,11 +940,20 @@
                 }
             },
             "additionalProperties": false,
-            "required": ["mode", "branch"]
+            "required": ["mode"]
         },
         "WorktreeMode": {
-            "type": "string",
-            "enum": ["create"]
+            "oneOf": [
+                {
+                    "type": "string",
+                    "enum": ["create"]
+                },
+                {
+                    "description": "既存checkoutへRunを関連づける。対象パスは設定に書かず実行時に受け取る\n(docs/specs/worktree.md#attach)。",
+                    "type": "string",
+                    "const": "attach"
+                }
+            ]
         }
     }
 }
