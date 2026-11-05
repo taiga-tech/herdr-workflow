@@ -74,6 +74,7 @@ fn run_with(
             base_env: env,
             load_secrets: loader,
             config_dir: None,
+            bootstrap_only: false,
         },
         session::new_run_id(),
     )
@@ -473,6 +474,7 @@ fn undefined_secret_fails_before_any_process_starts() {
             base_env: EnvMap::new(),
             load_secrets: no_secrets(),
             config_dir: None,
+            bootstrap_only: false,
         },
         session::new_run_id(),
     )

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::engine::{Recorder, RunOutcome, RunPhase, RunSnapshot};
 use crate::runtime::logs;
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -95,7 +95,7 @@ impl Store {
             let backup = path.with_extension(format!("v{version}.bak"));
             std::fs::copy(path, &backup).map_err(|error| StoreError::Backup(error.to_string()))?;
         }
-        if version < SCHEMA_VERSION {
+        if version < 1 {
             conn.execute_batch(
                 "BEGIN;
                 CREATE TABLE IF NOT EXISTS runs (
@@ -127,6 +127,27 @@ impl Store {
                 );
                 CREATE INDEX IF NOT EXISTS events_by_run ON events(run_id, id);
                 PRAGMA user_version = 1;
+                COMMIT;",
+            )?;
+        }
+        if version < 2 {
+            // 版2: 承認と自動受付の重複判定(docs/specs/security.md、recovery.md)。
+            conn.execute_batch(
+                "BEGIN;
+                CREATE TABLE IF NOT EXISTS approvals (
+                    repo TEXT NOT NULL,
+                    config_hash TEXT NOT NULL,
+                    approved_at TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    PRIMARY KEY (repo, config_hash)
+                );
+                CREATE TABLE IF NOT EXISTS acceptances (
+                    key TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    hold_reason TEXT,
+                    received_at TEXT NOT NULL
+                );
+                PRAGMA user_version = 2;
                 COMMIT;",
             )?;
         }
@@ -312,6 +333,62 @@ impl Store {
     }
 }
 
+impl Store {
+    /// 承認を記録する(同じ組は上書き)。
+    pub fn approve(&self, repo: &str, config_hash: &str, summary: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO approvals (repo, config_hash, approved_at, summary) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(repo, config_hash) DO UPDATE SET approved_at = excluded.approved_at,
+                summary = excluded.summary",
+            params![repo, config_hash, logs::rfc3339(std::time::SystemTime::now()), summary],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_approved(&self, repo: &str, config_hash: &str) -> Result<bool, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT 1 FROM approvals WHERE repo = ?1 AND config_hash = ?2",
+                params![repo, config_hash],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// 自動受付を一度だけ記録する。既に同じキーがあれば`false`(重複)。
+    pub fn accept_once(&self, key: &str, hold_reason: Option<&str>) -> Result<bool, StoreError> {
+        let inserted = self.conn.execute(
+            "INSERT OR IGNORE INTO acceptances (key, run_id, hold_reason, received_at)
+             VALUES (?1, NULL, ?2, ?3)",
+            params![
+                key,
+                hold_reason,
+                logs::rfc3339(std::time::SystemTime::now())
+            ],
+        )?;
+        Ok(inserted == 1)
+    }
+
+    /// 保留していた受付を、承認後の再受付のために取り除く。
+    pub fn release_held(&self, key: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM acceptances WHERE key = ?1 AND hold_reason IS NOT NULL",
+            params![key],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_acceptance_run(&self, key: &str, run_id: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE acceptances SET run_id = ?2, hold_reason = NULL WHERE key = ?1",
+            params![key, run_id],
+        )?;
+        Ok(())
+    }
+}
+
 /// エンジンの記録をSQLiteへ保存し、通知を任意の出力先へも渡す。
 pub struct StoreRecorder<'a> {
     pub store: &'a mut Store,
@@ -396,6 +473,24 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, 99);
+    }
+
+    #[test]
+    fn version_one_database_is_backed_up_and_migrated() {
+        let tmp = TempDir::new("store");
+        let path = tmp.0.join("state.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE runs (id TEXT); PRAGMA user_version = 1;")
+                .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert!(path.with_extension("v1.bak").exists());
+        assert!(!store.is_approved("repo", "h").unwrap());
+        store.approve("repo", "h", "summary").unwrap();
+        assert!(store.is_approved("repo", "h").unwrap());
+        assert!(store.accept_once("k", None).unwrap());
+        assert!(!store.accept_once("k", None).unwrap());
     }
 
     #[test]

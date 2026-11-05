@@ -53,6 +53,8 @@ pub struct RunRequest<'a> {
     pub inputs: &'a BTreeMap<InputId, String>,
     pub checkout: &'a Path,
     pub target: Option<TaskId>,
+    /// 自動受付の初期化だけを行う(`bootstrap.targets`とその依存先)。
+    pub bootstrap_only: bool,
     pub base_env: EnvMap,
     /// 秘密値定義の読み込み口(Run開始時とAttempt起動直前に呼ぶ)。
     pub load_secrets: SecretsLoader,
@@ -75,7 +77,14 @@ pub fn new_run_id() -> String {
 }
 
 /// 対象タスクと、その依存先・初期化対象の推移閉包。
-fn select_tasks(plan: &ExecutionPlan, target: Option<&TaskId>) -> BTreeSet<TaskId> {
+fn select_tasks(
+    plan: &ExecutionPlan,
+    target: Option<&TaskId>,
+    bootstrap_only: bool,
+) -> BTreeSet<TaskId> {
+    if bootstrap_only {
+        return plan.init_boundary.clone();
+    }
     let Some(target) = target else {
         return plan.tasks.keys().cloned().collect();
     };
@@ -169,7 +178,7 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         _ => None,
     };
 
-    let selected = select_tasks(&plan, request.target.as_ref());
+    let selected = select_tasks(&plan, request.target.as_ref(), request.bootstrap_only);
     for id in &selected {
         if plan.tasks[id].kind == PlannedTaskKind::Agent {
             return Err(SessionError::HeadlessAgent(id.0.clone()));

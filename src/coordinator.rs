@@ -221,6 +221,8 @@ struct StartParams {
     env: BTreeMap<String, String>,
     #[serde(default)]
     plugin_config: Option<Value>,
+    #[serde(default)]
+    bootstrap_only: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,6 +259,7 @@ fn env_map(env: &BTreeMap<String, String>) -> engine::EnvMap {
 }
 
 struct StartSpec {
+    bootstrap_only: bool,
     record: RunRecord,
     workflow: String,
     plugin_config: PluginConfig,
@@ -284,6 +287,7 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             inputs: &inputs,
             checkout: &start.record.checkout,
             target: start.record.target.clone().map(TaskId),
+            bootstrap_only: start.bootstrap_only,
             base_env: env_map(&start.env),
             load_secrets: load_secrets_from_env(&start.env),
             config_dir: start.record.config_path.parent().map(Path::to_path_buf),
@@ -470,6 +474,7 @@ fn handle_start(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody>
             env: params.env,
             initial: BTreeMap::new(),
             is_new: true,
+            bootstrap_only: params.bootstrap_only,
         },
     )
 }
@@ -543,6 +548,7 @@ fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody
             env: params.env,
             initial,
             is_new: false,
+            bootstrap_only: false,
         },
     )
 }

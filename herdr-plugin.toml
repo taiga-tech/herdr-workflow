@@ -2,7 +2,7 @@ id = "herdr-workflow"
 name = "Herdr Workflow"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-description = "Validate .herdr/workflow.yaml (syntax, DAG, grid) without running any task"
+description = "Validate and run .herdr/workflow.yaml task graphs for worktrees"
 # Windowsは受け入れ試験(T32)が未実施のため対象から外す。段階Eで検証後に追加する。
 platforms = ["linux", "macos"]
 
@@ -15,3 +15,15 @@ title = "Validate workflow config"
 description = "Check .herdr/workflow.yaml for syntax, DAG, and grid errors without running anything"
 contexts = ["workspace"]
 command = ["target/release/herdr-workflow", "validate"]
+
+[[actions]]
+id = "status"
+title = "Show workflow runs"
+description = "List recent runs recorded in the herdr-workflow state directory"
+contexts = ["global", "workspace"]
+command = ["target/release/herdr-workflow", "status"]
+
+# 承認済み(`herdr-workflow trust`)のworkflowだけを初期化する。未承認は保留して終了コード3。
+[[events]]
+on = "worktree.created"
+command = ["target/release/herdr-workflow", "hook"]

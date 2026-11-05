@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ use crate::state::models::{AttemptOutcome, ReadinessState, TaskState};
 
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_CONFIG: i32 = 2;
+pub const EXIT_NEEDS_APPROVAL: i32 = 3;
 pub const EXIT_FAILED: i32 = 4;
 pub const EXIT_CONNECTION: i32 = 5;
 pub const EXIT_UNKNOWN: i32 = 6;
@@ -40,6 +41,10 @@ const SUBCOMMANDS: &[&str] = &[
     "resume",
     "retry",
     "doctor",
+    "trust",
+    "hook",
+    "cleanup",
+    "remove",
 ];
 
 #[must_use]
@@ -171,6 +176,10 @@ pub fn main(args: &[String]) -> i32 {
             resume_main(&state, &parsed, Some(task))
         }
         "doctor" => doctor_main(&state, &parsed),
+        "trust" => trust_main(&state, &parsed),
+        "hook" => hook_main(&state, &parsed),
+        "cleanup" => cleanup_main(&state, &parsed),
+        "remove" => remove_main(&state, &parsed),
         other => {
             eprint_error(parsed.json, "cli", &format!("unknown subcommand {other:?}"));
             EXIT_CONFIG
@@ -815,4 +824,298 @@ fn doctor_main(state: &StateDir, args: &Args) -> i32 {
         }
     }
     if fatal { EXIT_CONNECTION } else { EXIT_OK }
+}
+
+fn read_config(args: &Args) -> Result<(PathBuf, String, plugin::PluginConfig), i32> {
+    let config = args
+        .config
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(".herdr/workflow.yaml"));
+    let plugin_config = plugin::load_from_env().map_err(|error| {
+        eprint_error(args.json, "plugin-config", &error.to_string());
+        EXIT_CONFIG
+    })?;
+    let text = std::fs::read_to_string(&config).map_err(|error| {
+        eprint_error(
+            args.json,
+            "load",
+            &format!("failed to read config file {}: {error}", config.display()),
+        );
+        EXIT_CONFIG
+    })?;
+    let config = std::fs::canonicalize(&config).unwrap_or(config);
+    Ok((config, text, plugin_config))
+}
+
+/// 表示した設定と実行内容を承認する(リポジトリ＋設定ハッシュ)。
+fn trust_main(state: &StateDir, args: &Args) -> i32 {
+    let (config, text, plugin_config) = match read_config(args) {
+        Ok(found) => found,
+        Err(code) => return code,
+    };
+    let spec = match load::load_str(&text) {
+        Ok(spec) => spec,
+        Err(error) => {
+            eprint_error(args.json, "load", &error.to_string());
+            return EXIT_CONFIG;
+        }
+    };
+    if let Err(error) = compile::compile_with_plugin_config(&spec, &plugin_config) {
+        eprint_error(args.json, "compile", &error.to_string());
+        return EXIT_CONFIG;
+    }
+    let hash = crate::approval::config_hash(&text, &plugin_config);
+    let repo = crate::approval::repo_key(config.parent().unwrap_or(Path::new(".")));
+    let summary = crate::approval::summary(&spec);
+    let store = match Store::open(&state.db_path()) {
+        Ok(store) => store,
+        Err(error) => {
+            eprint_error(args.json, "store", &error.to_string());
+            return EXIT_CONNECTION;
+        }
+    };
+    if let Err(error) = store.approve(&repo, &hash, &summary) {
+        eprint_error(args.json, "store", &error.to_string());
+        return EXIT_CONNECTION;
+    }
+    if args.json {
+        println!(
+            "{}",
+            json!({ "ok": true, "repo": repo, "configHash": hash, "summary": summary })
+        );
+    } else {
+        println!("{summary}\n承認しました: {repo} {hash}");
+        println!(
+            "Gitのhookやフィルター、パッケージ管理ツールの処理も実行されうることに注意してください。"
+        );
+    }
+    EXIT_OK
+}
+
+/// Herdrの`[[events]]`から呼ばれる受付処理。`worktree.created`/`worktree.opened`で、
+/// 承認済みのworkflowの初期化(`bootstrap.targets`)だけを開始する。
+fn hook_main(state: &StateDir, args: &Args) -> i32 {
+    let event_name = std::env::var("HERDR_PLUGIN_EVENT").unwrap_or_default();
+    if !matches!(event_name.as_str(), "worktree.created" | "worktree.opened") {
+        println!("ignored event {event_name:?}");
+        return EXIT_OK;
+    }
+    let payload = std::env::var("HERDR_PLUGIN_EVENT_JSON").unwrap_or_default();
+    let Some(event) = crate::approval::parse_worktree_event(&payload) else {
+        eprint_error(args.json, "hook", "event has no worktree record");
+        return EXIT_CONFIG;
+    };
+    if event.is_linked_worktree == Some(false) {
+        println!("main worktree is not initialized automatically");
+        return EXIT_OK;
+    }
+    let checkout = std::fs::canonicalize(&event.path).unwrap_or(event.path.clone());
+    let Ok(info) = crate::runtime::git::inspect(&checkout) else {
+        eprint_error(args.json, "hook", "worktree path is not a Git working tree");
+        return EXIT_UNKNOWN;
+    };
+    // 作成元(main worktree)の設定を使い、作成したブランチの同名設定へ読み替えない。
+    let Some(primary) = info.primary.clone() else {
+        eprint_error(args.json, "hook", "cannot determine the primary worktree");
+        return EXIT_UNKNOWN;
+    };
+    let config = primary.join(".herdr/workflow.yaml");
+    let Ok(text) = std::fs::read_to_string(&config) else {
+        println!("no workflow config at {}", config.display());
+        return EXIT_OK;
+    };
+    let plugin_config = match plugin::load_from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            eprint_error(args.json, "plugin-config", &error.to_string());
+            return EXIT_CONFIG;
+        }
+    };
+    let spec = match load::load_str(&text) {
+        Ok(spec) => spec,
+        Err(error) => {
+            eprint_error(args.json, "load", &error.to_string());
+            return EXIT_CONFIG;
+        }
+    };
+    let hash = crate::approval::config_hash(&text, &plugin_config);
+    let repo = crate::approval::repo_key(&primary);
+    let key = crate::approval::acceptance_key(&checkout, &spec.name, &hash);
+    let store = match Store::open(&state.db_path()) {
+        Ok(store) => store,
+        Err(error) => {
+            eprint_error(args.json, "store", &error.to_string());
+            return EXIT_CONNECTION;
+        }
+    };
+    if !store.is_approved(&repo, &hash).unwrap_or(false) {
+        let _ = store.accept_once(&key, Some("needs-approval"));
+        println!(
+            "holdReason=needs-approval: run `herdr-workflow trust --config {}`",
+            config.display()
+        );
+        return EXIT_NEEDS_APPROVAL;
+    }
+    // 承認前に保留した受付は、承認後の同じイベントで受け付け直す。
+    let _ = store.release_held(&key);
+    let branch = match (&event.branch, event.is_detached) {
+        (Some(branch), false) => branch.clone(),
+        _ => {
+            let _ = store.accept_once(&key, Some("needs-branch"));
+            println!(
+                "holdReason=needs-branch: detached checkouts are not initialized automatically"
+            );
+            return EXIT_NEEDS_APPROVAL;
+        }
+    };
+    match store.accept_once(&key, None) {
+        Ok(true) => {}
+        Ok(false) => {
+            println!("already accepted for this checkout generation");
+            return EXIT_OK;
+        }
+        Err(error) => {
+            eprint_error(args.json, "store", &error.to_string());
+            return EXIT_CONNECTION;
+        }
+    }
+    let mut inputs = Vec::new();
+    if spec
+        .inputs
+        .contains_key(&crate::config::model::InputId("branch".to_string()))
+    {
+        inputs.push(("branch".to_string(), branch));
+    }
+    let mut client = match Client::connect_or_spawn(state) {
+        Ok(client) => client,
+        Err(error) => return remote_exit(args.json, &error),
+    };
+    let params = json!({
+        "configPath": config,
+        "workflow": text,
+        "inputs": inputs,
+        "checkout": checkout,
+        "target": null,
+        "env": coordinator::current_env(),
+        "pluginConfig": plugin_config,
+        "bootstrapOnly": true,
+    });
+    match client.call("run.start", params) {
+        Ok(result) => {
+            let run_id = result["runId"].as_str().unwrap_or_default();
+            let _ = store.set_acceptance_run(&key, run_id);
+            println!("{run_id}");
+            EXIT_OK
+        }
+        Err(error) => remote_exit(args.json, &error),
+    }
+}
+
+/// 削除候補と保留理由を表示する。`attach`や単独CLIで使ったcheckoutは借用として削除しない。
+fn cleanup_review(
+    state: &StateDir,
+    run_id: &str,
+) -> Result<(RunRecord, Vec<String>, Value), String> {
+    let store = Store::open(&state.db_path()).map_err(|error| error.to_string())?;
+    let run = store.run(run_id).map_err(|error| error.to_string())?;
+    let tasks = store.tasks(run_id).unwrap_or_default();
+    let mut holds = Vec::new();
+    if !is_done(run.phase) {
+        holds.push("run is still active; stop it first".to_string());
+    }
+    let live: Vec<&str> = tasks
+        .iter()
+        .filter(|(_, task)| {
+            matches!(
+                task.runtime.state,
+                TaskState::Running | TaskState::Starting | TaskState::Stopping | TaskState::Unknown
+            )
+        })
+        .map(|(id, _)| id.0.as_str())
+        .collect();
+    if !live.is_empty() {
+        holds.push(format!("tasks may still be running: {}", live.join(", ")));
+    }
+    // 本プラグインがworktreeを作成した記録はまだないため、すべて借用として扱う。
+    holds.push(
+        "checkout is borrowed (not created by herdr-workflow); it is never removed".to_string(),
+    );
+    let info = crate::runtime::git::inspect(&run.checkout).ok();
+    let changes = crate::runtime::git::changes(&run.checkout).ok();
+    if info
+        .as_ref()
+        .is_some_and(|info| info.primary.as_deref() == Some(info.toplevel.as_path()))
+    {
+        holds.push("checkout is the main worktree".to_string());
+    }
+    let detail = json!({
+        "checkout": run.checkout,
+        "exists": run.checkout.exists(),
+        "branch": info.as_ref().and_then(|info| info.branch.clone()),
+        "trackedChanges": changes.as_ref().map(|c| c.tracked_changes.clone()),
+        "untracked": changes.as_ref().map(|c| c.untracked.clone()),
+        "ignored": changes.as_ref().map(|c| c.ignored.clone()),
+        "liveTasks": live,
+    });
+    Ok((run, holds, detail))
+}
+
+fn cleanup_main(state: &StateDir, args: &Args) -> i32 {
+    if args.positional.first().map(String::as_str) != Some("plan") {
+        eprint_error(args.json, "cli", "usage: cleanup plan RUN");
+        return EXIT_CONFIG;
+    }
+    let Some(run_id) = args.positional.get(1) else {
+        eprint_error(args.json, "cli", "usage: cleanup plan RUN");
+        return EXIT_CONFIG;
+    };
+    match cleanup_review(state, run_id) {
+        Ok((_, holds, detail)) => {
+            if args.json {
+                println!(
+                    "{}",
+                    json!({ "ok": true, "candidate": detail, "holds": holds })
+                );
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&detail).unwrap_or_default()
+                );
+                for hold in &holds {
+                    println!("hold: {hold}");
+                }
+            }
+            EXIT_OK
+        }
+        Err(message) => {
+            eprint_error(args.json, "cleanup", &message);
+            EXIT_FAILED
+        }
+    }
+}
+
+/// 確認済みの所有worktreeだけを削除する。保留理由が一つでもあれば何も削除しない(T27)。
+fn remove_main(state: &StateDir, args: &Args) -> i32 {
+    let Some(run_id) = args.positional.first() else {
+        eprint_error(args.json, "cli", "RUN is required");
+        return EXIT_CONFIG;
+    };
+    match cleanup_review(state, run_id) {
+        Ok((_, holds, _)) if !holds.is_empty() => {
+            eprint_error(
+                args.json,
+                "remove",
+                &format!("not removed: {}", holds.join("; ")),
+            );
+            EXIT_FAILED
+        }
+        Ok(_) => {
+            eprint_error(args.json, "remove", "no owned worktree to remove");
+            EXIT_FAILED
+        }
+        Err(message) => {
+            eprint_error(args.json, "remove", &message);
+            EXIT_FAILED
+        }
+    }
 }
