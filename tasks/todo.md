@@ -442,8 +442,8 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - [x] 設定型(script、env値、locks、retry、waitFor tcp/log/monitor、attach)
 - [x] 意味検証と置換後のTCPポート検査、単体テスト
 - [x] 設定例へretryとmonitorを追加
-- [ ] cargo fmt / clippy / test(環境制約で未実行)
-- [ ] `schema/workflow.schema.json`の再生成
+- [x] cargo fmt / clippy / test
+- [x] `schema/workflow.schema.json`の再生成
 - [ ] `secrets.yaml`の読み込み(所有者確認に追加依存が必要)
 
 ### レビュー
@@ -451,3 +451,5 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - `static.crates.io`がネットワーク設定で拒否され、依存クレートを取得できずcargoを実行できなかった。`rustfmt --edition 2024`で構文と書式のみ確認し、テストが組み立てるYAMLの構造はPyYAMLで確認した。
 - GitHub Actions CIを追加しようとしたが、GitHub Appに`workflows`権限がなくpushが拒否されたため取り消した。
 - 文書検査(docs:test・docs:check相当)はPASS。
+- 後続作業で`static.crates.io`が許可され、cargoを実行した。clippyが`TaskDef`の`large_enum_variant`で失敗したため、`wait_for`を`Option<Box<WaitFor>>`に変更した(入力形式は変わらない)。`cargo fmt --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked`(単体165件・統合10件)が成功。手元のrustcは1.97.0で、`mise.toml`の1.93.1では未確認。
+- `herdr-workflow schema`でスキーマを再生成し、prettierで整形した。`examples/workflow.yaml`は`validate`コマンドと生成スキーマの両方で妥当。`secrets.yaml`の読み込みとHerdr実機試験は未実施。

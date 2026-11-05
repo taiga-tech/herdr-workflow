@@ -102,7 +102,7 @@ limits:
 
 ## Q11で定めた入力形式
 
-未決事項[Q11](../planning/open-questions.md#q11)で決めたworkflow設定のキーを次に示す。動作規則はリンク先の仕様を主文書とする。これらのキーは設定型(`src/config/model.rs`)と意味検証(`src/config/validate.rs`・`src/config/substitute.rs`)で扱う。`schema/workflow.schema.json`の再生成と、`secrets.yaml`の読み込みは未実装である。
+未決事項[Q11](../planning/open-questions.md#q11)で決めたworkflow設定のキーを次に示す。動作規則はリンク先の仕様を主文書とする。これらのキーは設定型(`src/config/model.rs`)、意味検証(`src/config/validate.rs`・`src/config/substitute.rs`)、生成スキーマ(`schema/workflow.schema.json`)で扱う。`secrets.yaml`の読み込みは未実装である。
 
 ### commandタスク
 
@@ -167,7 +167,7 @@ secrets:
 
 ## 仕様化の残件
 
-Q11で定めたキーについて、生成スキーマの再生成と`secrets.yaml`の読み込みが残っている。本文にないキーを推測して追加しない。
+Q11で定めたキーについて、`secrets.yaml`の読み込みが残っている。本文にないキーを推測して追加しない。
 
 Rustの設定型(`WorkflowSpec`)から`herdr-workflow schema`コマンドでJSON Schema(`schema/workflow.schema.json`)を生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。この役割分担は`tests/schema_contract.rs`で固定している(構造的に正しいがDAGとして不正な設定がスキーマ検証を通ることを確認し、その意味検証は`plan::compile::compile`が担う)。
 
