@@ -89,11 +89,24 @@ pub struct RunConfig {
     pub agent_poll: Duration,
 }
 
-/// 画面構築の結果。Agentごとの起動結果(成功時はpane ID、失敗時は理由)を返す。
+/// 画面構築の結果。Agentごとの扱いを返す。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InitOutcome {
     pub message: String,
-    pub agents: BTreeMap<TaskId, Result<String, String>>,
+    pub agents: BTreeMap<TaskId, AgentStart>,
+}
+
+/// 画面構築・再開時のAgentの扱い。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentStart {
+    /// 指定paneで新しく起動した(新しいAttempt)。
+    Started(String),
+    /// 記録と同じpaneで稼働中のAgentを照合し、追跡を再開した(起動し直さない)。
+    Adopted(String),
+    /// 稼働していないが、resumeでは起動し直さない。
+    NotRestarted(String),
+    /// 起動または照合に失敗した。
+    Failed(String),
 }
 
 /// 画面構築等の処理。失敗するとRunを失敗として停止する。
@@ -354,12 +367,13 @@ impl<'r> Engine<'r> {
             .agents
             .iter()
             .map(|(id, name)| {
+                let (runtime, detail) = config.initial.get(id).cloned().unwrap_or_default();
                 (
                     id.clone(),
                     AgentSlot {
                         name: name.clone(),
-                        runtime: TaskRuntimeState::default(),
-                        detail: None,
+                        runtime,
+                        detail,
                         cancel: Arc::new(AtomicBool::new(false)),
                     },
                 )
@@ -581,15 +595,27 @@ impl<'r> Engine<'r> {
                 self.phase = RunPhase::Stopping;
             }
         } else if let Some(target) = self.config.target.clone() {
-            let slot = &self.slots[&target];
-            let target_success = match slot.prepared.lifecycle {
-                TaskLifecycle::Job => slot.runtime.state == TaskState::Succeeded,
-                TaskLifecycle::Service => {
-                    slot.runtime.state == TaskState::Running
-                        && slot.runtime.readiness == ReadinessState::Ready
-                }
-            };
-            if target_success || slot.is_terminal() {
+            // 対象がAgentなら、起動して入力可能(ready)になった時点で結果を確定する。
+            let (target_success, target_terminal) =
+                match (self.slots.get(&target), self.agents.get(&target)) {
+                    (Some(slot), _) => (
+                        match slot.prepared.lifecycle {
+                            TaskLifecycle::Job => slot.runtime.state == TaskState::Succeeded,
+                            TaskLifecycle::Service => {
+                                slot.runtime.state == TaskState::Running
+                                    && slot.runtime.readiness == ReadinessState::Ready
+                            }
+                        },
+                        slot.is_terminal(),
+                    ),
+                    (None, Some(agent)) => (
+                        agent.runtime.state == TaskState::Running
+                            && agent.runtime.readiness == ReadinessState::Ready,
+                        agent.is_terminal(),
+                    ),
+                    (None, None) => (false, true),
+                };
+            if target_success || target_terminal {
                 self.outcome = if target_success {
                     RunOutcome::Succeeded
                 } else {
@@ -1311,18 +1337,45 @@ impl<'r> Engine<'r> {
         }
     }
 
-    /// 画面構築でのAgent起動結果を反映し、観測値の照会を始める。
-    fn start_agent_tracking(&mut self, results: BTreeMap<TaskId, Result<String, String>>) {
+    /// 画面構築・再開でのAgentの扱いを反映し、観測値の照会を始める。
+    fn start_agent_tracking(&mut self, results: BTreeMap<TaskId, AgentStart>) {
         let now = logs::rfc3339(SystemTime::now());
         let mut notices = Vec::new();
+        let mut track = Vec::new();
         for (id, agent) in &mut self.agents {
+            let failed_attempt = |agent: &mut AgentSlot, reason: &str| {
+                let next = agent
+                    .runtime
+                    .attempts
+                    .last()
+                    .map_or(1, |attempt| attempt.attempt_id.0 + 1);
+                agent.runtime.record_attempt_result(AttemptResult {
+                    attempt_id: AttemptId(next),
+                    launch_evidence: LaunchEvidence {
+                        pid: None,
+                        started_at: Some(now.clone()),
+                        command_summary: format!("herdr agent {}", agent.name),
+                    },
+                    outcome: AttemptOutcome::LaunchFailed(reason.to_string()),
+                    log_position: LogPosition {
+                        byte_offset: 0,
+                        line_number: 0,
+                    },
+                });
+            };
             match results.get(id) {
-                Some(Ok(pane)) => {
+                Some(AgentStart::Started(pane)) => {
                     // Herdrの`agent.start`は入力準備ができてから成功を返すため、readyとする。
+                    let next = agent
+                        .runtime
+                        .attempts
+                        .last()
+                        .map_or(1, |attempt| attempt.attempt_id.0 + 1);
                     agent.runtime.state = TaskState::Running;
                     agent.runtime.readiness = ReadinessState::Ready;
+                    agent.runtime.agent = None;
                     agent.runtime.record_attempt_result(AttemptResult {
-                        attempt_id: AttemptId(1),
+                        attempt_id: AttemptId(next),
                         launch_evidence: LaunchEvidence {
                             pid: None,
                             started_at: Some(now.clone()),
@@ -1335,54 +1388,62 @@ impl<'r> Engine<'r> {
                         },
                     });
                     agent.detail = Some(format!("pane {pane}"));
-                    if let Some(observe) = self.config.observe_agent.clone() {
-                        let tx = self.events_tx.clone();
-                        let task = id.clone();
-                        let name = agent.name.clone();
-                        let cancel = Arc::clone(&agent.cancel);
-                        let interval = self.config.agent_poll;
-                        self.threads.push(std::thread::spawn(move || {
-                            while !cancel.load(Ordering::Relaxed) {
-                                let probe = observe(&name);
-                                let gone = probe == AgentProbe::Gone;
-                                if tx
-                                    .send(Event::Agent {
-                                        task: task.clone(),
-                                        probe,
-                                    })
-                                    .is_err()
-                                    || gone
-                                {
-                                    break;
-                                }
-                                sleep_unless(&cancel, interval);
-                            }
-                        }));
-                    }
+                    track.push(id.clone());
                 }
-                Some(Err(reason)) => {
+                Some(AgentStart::Adopted(pane)) => {
+                    agent.runtime.state = TaskState::Running;
+                    agent.runtime.readiness = ReadinessState::Ready;
+                    agent.detail = Some(format!("re-adopted running agent in pane {pane}"));
+                    notices.push(format!("[{}] re-adopted running agent in {pane}", id.0));
+                    track.push(id.clone());
+                }
+                Some(AgentStart::NotRestarted(reason)) => {
+                    agent.runtime.state = TaskState::Stopped;
+                    agent.runtime.readiness = ReadinessState::Unready;
+                    agent.detail = Some(reason.clone());
+                    notices.push(format!("[{}] {reason}", id.0));
+                }
+                Some(AgentStart::Failed(reason)) => {
                     agent.runtime.state = TaskState::Failed;
                     agent.runtime.readiness = ReadinessState::Unready;
-                    agent.runtime.record_attempt_result(AttemptResult {
-                        attempt_id: AttemptId(1),
-                        launch_evidence: LaunchEvidence {
-                            pid: None,
-                            started_at: Some(now.clone()),
-                            command_summary: format!("herdr agent {}", agent.name),
-                        },
-                        outcome: AttemptOutcome::LaunchFailed(reason.clone()),
-                        log_position: LogPosition {
-                            byte_offset: 0,
-                            line_number: 0,
-                        },
-                    });
+                    failed_attempt(agent, reason);
                     agent.detail = Some(format!("agent start failed: {reason}"));
                     notices.push(format!("[{}] agent start failed: {reason}", id.0));
                 }
                 None => {
-                    agent.runtime.state = TaskState::Skipped;
-                    agent.detail = Some("no agent pane was created".to_string());
+                    if agent.runtime.state == TaskState::Waiting {
+                        agent.runtime.state = TaskState::Skipped;
+                        agent.detail = Some("no agent pane was created".to_string());
+                    }
                 }
+            }
+        }
+        if let Some(observe) = self.config.observe_agent.clone() {
+            for id in track {
+                let agent = &self.agents[&id];
+                let tx = self.events_tx.clone();
+                let observe = Arc::clone(&observe);
+                let task = id.clone();
+                let name = agent.name.clone();
+                let cancel = Arc::clone(&agent.cancel);
+                let interval = self.config.agent_poll;
+                self.threads.push(std::thread::spawn(move || {
+                    while !cancel.load(Ordering::Relaxed) {
+                        let probe = observe(&name);
+                        let gone = probe == AgentProbe::Gone;
+                        if tx
+                            .send(Event::Agent {
+                                task: task.clone(),
+                                probe,
+                            })
+                            .is_err()
+                            || gone
+                        {
+                            break;
+                        }
+                        sleep_unless(&cancel, interval);
+                    }
+                }));
             }
         }
         self.dirty = true;

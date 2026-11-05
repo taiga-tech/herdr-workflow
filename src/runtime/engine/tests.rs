@@ -764,7 +764,10 @@ fn agent_observations_are_tracked_without_becoming_task_results() {
     prepared.config.on_init_complete = Some(Box::new(|| {
         Ok(InitOutcome {
             message: "layout".to_string(),
-            agents: BTreeMap::from([(TaskId::from("developer"), Ok("w1:p2".to_string()))]),
+            agents: BTreeMap::from([(
+                TaskId::from("developer"),
+                AgentStart::Started("w1:p2".to_string()),
+            )]),
         })
     }));
     let probes = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from([

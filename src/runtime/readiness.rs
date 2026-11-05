@@ -166,7 +166,14 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         assert!(tcp_probe("127.0.0.1", port, Duration::from_secs(1)));
         drop(listener);
-        assert!(!tcp_probe("127.0.0.1", port, Duration::from_millis(200)));
+        // 並行する試験が同じ番号を再利用することがあるため、何度か確かめる。
+        assert!((0..20).any(|_| {
+            let closed = !tcp_probe("127.0.0.1", port, Duration::from_millis(200));
+            if !closed {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            closed
+        }));
     }
 
     #[test]

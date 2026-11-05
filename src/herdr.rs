@@ -263,6 +263,48 @@ pub fn start_agent(
     Ok(())
 }
 
+/// 画面構築の結果として状態ストアへ保存するHerdr側の識別子。resumeでは
+/// これを照合してから使い、照合できないpane IDでは操作しない(T17)。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HerdrState {
+    pub workspace_id: String,
+    /// `<tab>/<pane>`(設定のID) → Herdrのpane ID。
+    pub panes: BTreeMap<String, String>,
+    /// Agentタスク → そのAgentを起動したpane ID。
+    pub agent_panes: BTreeMap<String, String>,
+}
+
+/// `pane.get`: paneが存在するか。`not_found`は`false`。
+pub fn pane_exists(client: &mut HerdrClient, pane_id: &str) -> Result<bool, HerdrError> {
+    match client.request("pane.get", json!({ "pane_id": pane_id })) {
+        Ok(result) => Ok(result["pane"]["pane_id"].as_str().is_some()),
+        Err(HerdrError::Remote { code, .. }) if code.contains("not_found") => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// `agent.get`: Agentの観測値とpane ID。名前が解決できなければ`None`。
+pub fn agent_info(
+    client: &mut HerdrClient,
+    target: &str,
+) -> Result<Option<(String, String)>, HerdrError> {
+    match client.request("agent.get", json!({ "target": target })) {
+        Ok(result) => Ok(Some((
+            result["agent"]["agent_status"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string(),
+            result["agent"]["pane_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ))),
+        Err(HerdrError::Remote { code, .. }) if code.contains("not_found") => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// `agent.get`: Agentの観測値(`agent_status`)を返す。Agentが終了・置換されて名前が
 /// 解決できない場合(`not_found`)は`None`。
 pub fn agent_status(client: &mut HerdrClient, target: &str) -> Result<Option<String>, HerdrError> {
@@ -320,6 +362,8 @@ pub(crate) mod fake {
         pub requests: Arc<Mutex<Vec<Value>>>,
         /// `agent.get`へ順に返す`agent_status`。尽きたら`not_found`を返す。
         pub agent_statuses: Arc<Mutex<std::collections::VecDeque<String>>>,
+        /// `pane.get`で`not_found`を返すpane ID。
+        pub missing_panes: Arc<Mutex<Vec<String>>>,
     }
 
     fn pane_ids(node: &Value, next: &mut u32) -> Value {
@@ -345,6 +389,8 @@ pub(crate) mod fake {
             let log = Arc::clone(&requests);
             let agent_statuses = Arc::new(Mutex::new(std::collections::VecDeque::new()));
             let statuses = Arc::clone(&agent_statuses);
+            let missing_panes = Arc::new(Mutex::new(Vec::new()));
+            let missing = Arc::clone(&missing_panes);
             std::thread::spawn(move || {
                 use std::io::{BufRead, BufReader, Write};
                 let mut next = 0;
@@ -357,6 +403,16 @@ pub(crate) mod fake {
                     }
                     let request: Value = serde_json::from_str(&line).unwrap();
                     log.lock().unwrap().push(request.clone());
+                    if request["method"] == "pane.get" {
+                        let pane = request["params"]["pane_id"].as_str().unwrap_or_default();
+                        let response = if missing.lock().unwrap().iter().any(|id| id == pane) {
+                            json!({ "id": request["id"], "error": { "code": "not_found", "message": "pane not found" } })
+                        } else {
+                            json!({ "id": request["id"], "result": { "type": "pane_info", "pane": { "pane_id": pane } } })
+                        };
+                        let _ = stream.write_all(format!("{response}\n").as_bytes());
+                        continue;
+                    }
                     if request["method"] == "agent.get" {
                         let response = match statuses.lock().unwrap().pop_front() {
                             Some(status) => json!({ "id": request["id"], "result": {
@@ -395,6 +451,7 @@ pub(crate) mod fake {
                 path,
                 requests,
                 agent_statuses,
+                missing_panes,
             }
         }
 

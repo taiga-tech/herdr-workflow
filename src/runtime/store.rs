@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::engine::{Recorder, RunOutcome, RunPhase, RunSnapshot};
 use crate::runtime::logs;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -51,6 +51,8 @@ pub struct RunRecord {
     pub plugin_config: String,
     /// 本プラグインがHerdrへ作成を依頼したworkspace。`None`のcheckoutは借用として扱う。
     pub owned_workspace: Option<String>,
+    /// Herdr連携で配置したpaneとAgentの対応(JSON、`herdr::HerdrState`)。
+    pub herdr_state: Option<String>,
 }
 
 pub struct Store {
@@ -162,14 +164,24 @@ impl Store {
                 COMMIT;",
             )?;
         }
+        if version < 4 {
+            // 版4: Herdr連携で作成したpaneとAgentの対応(resumeで照合する)。
+            conn.execute_batch(
+                "BEGIN;
+                ALTER TABLE runs ADD COLUMN herdr_state TEXT;
+                PRAGMA user_version = 4;
+                COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
     pub fn insert_run(&self, record: &RunRecord) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO runs (id, created_at, updated_at, plan_hash, config_path, checkout, target,
-                phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace,
+                herdr_state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 record.run_id,
                 record.created_at,
@@ -185,6 +197,7 @@ impl Store {
                 record.coordinator_pid,
                 record.plugin_config,
                 record.owned_workspace,
+                record.herdr_state,
             ],
         )?;
         Ok(())
@@ -245,6 +258,7 @@ impl Store {
                 coordinator_pid: row.get(11)?,
                 plugin_config: row.get(12)?,
                 owned_workspace: row.get(13)?,
+                herdr_state: row.get(14)?,
             },
             row.get(7)?,
             row.get(8)?,
@@ -258,7 +272,7 @@ impl Store {
         Ok(record)
     }
 
-    const RUN_COLUMNS: &'static str = "id, created_at, updated_at, plan_hash, config_path, checkout, target, phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace";
+    const RUN_COLUMNS: &'static str = "id, created_at, updated_at, plan_hash, config_path, checkout, target, phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace, herdr_state";
 
     pub fn run(&self, run_id: &str) -> Result<RunRecord, StoreError> {
         let raw = self
@@ -348,6 +362,14 @@ impl Store {
 
 impl Store {
     /// 承認を記録する(同じ組は上書き)。
+    pub fn set_herdr_state(&self, run_id: &str, state: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE runs SET herdr_state = ?2 WHERE id = ?1",
+            params![run_id, state],
+        )?;
+        Ok(())
+    }
+
     pub fn approve(&self, repo: &str, config_hash: &str, summary: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO approvals (repo, config_hash, approved_at, summary) VALUES (?1, ?2, ?3, ?4)
@@ -456,6 +478,7 @@ mod tests {
             coordinator_pid: Some(1),
             plugin_config: String::new(),
             owned_workspace: None,
+            herdr_state: None,
         }
     }
 
