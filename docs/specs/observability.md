@@ -3,7 +3,7 @@ id: SPEC-OBSERVABILITY
 title: 'readinessとログ'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-11-05'
 ---
 
 # readinessとログ
@@ -33,9 +33,20 @@ HTTPとTCPは既定でloopbackを対象とする。外部URLは設定で明示�
 
 readiness待ちの間にプロセスが終了したら、その時点で待機を終了する。一定時間sleepしただけで`ready`にしない。
 
+<a id="readiness-config"></a>
+
+### 設定した確認の扱い
+
+キーと値の範囲は[設定](../reference/configuration.md#q11-keys)で管理する。
+
+- `tcp`は`host`・`port`への接続が`consecutiveSuccesses`回連続で成功したらreadyとする。接続できるだけで、そのポートを対象プロセスが開いていることは保証しない。起動前に同じポートが使用中なら、readyにせず起動を保留または失敗にする([T07](../testing/acceptance.md#t07))。
+- `log`は現在のAttemptが`stream`へ出力した行を、改行を除いて1行ずつ`pattern`と照合し、最初に一致した時点でreadyとする。行は制御文字を除いた表示用の内容で照合し、UTF-8として不正なバイトは置換文字に変える。過去のAttemptのログや、一致前に出力済みのファイルを照合対象にしない。
+- `timeoutSeconds`までにreadyにならなければ待機を終了し、Attemptを失敗として記録する。
+- Agentのreadyは`waitFor`を使わず、Herdrによる起動・入力準備の確認で判定する。期限はHerdr連携の実装時に定める。
+
 ### 準備後の状態低下
 
-serviceの確認を継続し、設定した回数以上失敗したら`unready`へ変える。新しい依存タスクは起動しない。実行中の依存jobは既定で停止する。完了済みjobを後から失敗へ書き換えることはせず、実行履歴に依存先の状態低下を追加する。
+`waitFor.monitor`を指定したhttp・tcpのserviceは、ready後も`intervalSeconds`ごとに同じ確認を続け、`failureThreshold`回連続で失敗したら`unready`へ変える。一度成功すると連続失敗回数を0に戻す。`monitor`を省略した場合と`log`の場合は、プロセスの終了だけで状態低下を検出する。新しい依存タスクは起動しない。実行中の依存jobは既定で停止する。完了済みjobを後から失敗へ書き換えることはせず、実行履歴に依存先の状態低下を追加する。
 
 serviceが予期せず終了した場合は、終了コード0でも`unexpected-exit`として扱う。利用者が停止要求を送っていた場合は`stopped`にする。
 

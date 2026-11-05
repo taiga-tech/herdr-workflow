@@ -96,7 +96,8 @@ class CheckDocsModesTest(unittest.TestCase):
     def test_unregistered_current_acceptance_test_fails_both_modes(self) -> None:
         acceptance = self.root / "docs/testing/acceptance.md"
         text = acceptance.read_text(encoding="utf-8")
-        text += '\n| <a id="t34"></a>T34 | unregistered fixture | reject |\n'
+        next_id = f"T{check_docs.CURRENT_ACCEPTANCE_TEST_MAX + 1:02d}"
+        text += f'\n| <a id="{next_id.lower()}"></a>{next_id} | unregistered fixture | reject |\n'
         acceptance.write_text(text, encoding="utf-8")
 
         current_result = check_docs.check()

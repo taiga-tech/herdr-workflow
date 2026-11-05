@@ -3,7 +3,7 @@ id: SPEC-EXECUTION
 title: 'コマンドとAgentの実行'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-11-05'
 ---
 
 # コマンドとAgentの実行
@@ -50,13 +50,35 @@ PIDだけで対象を決めず、起動時刻、所有Run、Attempt、コマン�
 
 プロセスが自分で別セッションへ離脱する動作は初期版の管理対象外とする。サービスはforegroundで動かす。`kill_on_drop`だけで子孫プロセスの停止を完了したと扱わない。[S7](../reference/sources.md#s7)
 
+<a id="script"></a>
+
+### シェルscript
+
+commandタスクは`argv`か`script`のどちらか一方を持つ。`script`はシェルの引数配列`shell`と本文`source`を明示し、`shell`の末尾に`source`を一つの引数として追加して起動する。例えば`shell: [bash, -euo, pipefail, -c]`は`bash -euo pipefail -c <source>`になる。既定のシェルは持たない。
+
+`shell`と`source`には`${...}`の値置換を行わない。入力値は`env`で環境変数として渡し、script内でシェルの変数として参照する。本文を承認対象として表示し、シェル構文の安全性は判定しない。
+
+<a id="environment"></a>
+
 ### 実行環境
 
 `cwd`を各タスクへ明示し、hookの作業ディレクトリや利用者の現在ディレクトリに依存しない。
 
-環境変数は起動元の環境に共通設定、タスク設定を順に適用する。秘密値は別の参照形式で扱い、解決済みの値を計画JSONへ書き出さない。`HERDR_*`等のホスト管理用識別子を設定ファイルから上書きさせない。
+環境変数は、起動元の環境をすべて継承し、`defaults.env`、タスクの`env`の順に上書きする。値に`null`を書いた変数は、それまでの段階で設定されていても削除する。`HERDR_`で始まる変数はホストと本プラグインの管理用であり、設定ファイルで設定・削除できない。検証時に拒否する。
+
+<a id="secrets"></a>
+
+値に`{secret: <名前>}`を書いた変数は、Attemptの起動直前に利用者の秘密値定義から解決する。解決済みの値を計画JSON、状態DB、`launch.json`、ログへ書き出さない。実行計画ハッシュには秘密値の名前だけを含める。秘密値のファイルと権限は[承認と秘密情報](security.md#secrets)を参照する。
+
+<a id="resource-lock"></a>
+
+### resource lock
 
 同じcheckout内の初期化は一つに制限する。別checkoutの初期化は並行できるが、共有するDBや外部環境を変更するタスクには明示的なresource lockを付ける。ロックは本プラグイン経由の実行を調停するものであり、他アプリケーションまで制御するものではない。
+
+commandタスクの`locks`に名前を列挙する。同じ[状態ディレクトリ](persistence.md#state-directory)を使う全Runで、同名のロックは排他とする。共有モードは持たない。Coordinatorは、依存条件を満たしたタスクの起動前に、列挙したロックをすべて同時に取得できる場合だけ取得する。一部だけを保持して待つことはしない。取得できない間はタスクを`waiting`に置き、待っているロック名を状態画面へ表示する。
+
+jobはAttemptの終了まで、serviceは停止まで保持する。再試行の待機中はロックを解放する。Coordinatorの再起動後は、保存した保持記録と稼働中のAttemptを照合して復元し、照合できない保持は状態不明のAttemptが残る間解放しない。
 
 ## 関連文書
 

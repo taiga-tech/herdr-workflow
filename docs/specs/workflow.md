@@ -3,7 +3,7 @@ id: SPEC-WORKFLOW
 title: 'DAGとスケジューラ'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-17'
+updated: '2026-11-05'
 ---
 
 # DAGとスケジューラ
@@ -73,6 +73,23 @@ jobの同時実行数、常駐service数、Agent数は別々に制限する。�
 通常タスクの既定動作は`stop-dependents`とする。未起動の依存タスクを`skipped`にし、実行中の依存タスクには`onDependencyLost`を適用する。独立したタスクの扱いは実行計画に明示する。
 
 停止処理は依存の逆順で行う。テストを止めた後にサーバーを止める等、利用側を先に停止する。自動再試行は既定で0回とし、明示設定したタスクだけを再試行する。
+
+<a id="retry"></a>
+
+### 自動再試行
+
+自動再試行の対象は`lifecycle: job`のcommandタスクに限る。serviceとAgentは自動で再起動しない。キーは[設定](../reference/configuration.md#q11-keys)の`retry`と`execution.retries`で指定する。
+
+| Attemptの結果                            | 再試行 |
+| ---------------------------------------- | ------ |
+| 終了コードが0以外                        | する   |
+| `timeoutSeconds`の期限切れによる停止     | する   |
+| 起動失敗(`LaunchFailed`)                 | しない |
+| 状態不明(`Unknown`)                      | しない |
+| 利用者の停止要求、依存先の喪失による停止 | しない |
+| 外部からの信号による終了                 | しない |
+
+再試行は`delaySeconds`待ってから新しいAttemptとして起動し、総Attempt数が`maxAttempts`に達したら最後の結果でTaskを確定する。待機中に停止要求やRunの取消があれば再試行しない。依存側は最終結果だけを見て判定し、途中の失敗では`stop-dependents`を適用しない。手動の`retry`コマンドはこの回数に含めない。
 
 ## 関連文書
 

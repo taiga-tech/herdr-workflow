@@ -416,3 +416,19 @@ docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満�
 ### レビュー
 
 - `mise`未導入の環境のため、`mise.toml`のdocs:test / docs:checkと同じuvコマンドを直接実行して成功(5件、PASS)。prettier --checkと`git diff --check`も成功。Rustコードは変更していないためCargo検査は未実施。Herdr実機での環境変数受け渡しは未試験。
+
+## Q11：設定入力形式の決定
+
+### 仕様と計画
+
+利用者の判断：waitForはtcp/logを追加しAgentは暗黙、継続確認は`waitFor.monitor`、retryはjobの終了失敗と期限切れのみ、scriptは`{shell, source}`、envは全継承＋`null`削除＋`HERDR_*`拒否、秘密値は`secrets.yaml`の名前付き参照、resource lockは排他のみの名前列、attachは実行時に対象を受け取る。
+
+- [x] キー表を`docs/reference/configuration.md`、動作規則を各仕様へ記載する
+- [x] 受け入れ試験T34〜T39を追加し、機能一覧と文書検査の上限を更新する
+- [x] Q11とADR-0005を同期する
+- [x] 文書検査(通常・移行監査)とprettierを実行する
+
+### レビュー
+
+- 文書検査の回帰テストが「未登録ID」をT34固定で作っていたため、上限+1から生成するよう修正した。docs:test相当(5件)、docs:check相当、`--check-migration`がPASS。
+- Rust設定型・生成スキーマ・`examples/workflow.yaml`への反映は未実施(次の作業)。Rust検査とHerdr実機試験は未実施。
