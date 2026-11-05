@@ -102,7 +102,7 @@ limits:
 
 ## Q11で定めた入力形式
 
-未決事項[Q11](../planning/open-questions.md#q11)で決めたworkflow設定のキーを次に示す。動作規則はリンク先の仕様を主文書とする。これらのキーは設定型(`src/config/model.rs`)、意味検証(`src/config/validate.rs`・`src/config/substitute.rs`)、生成スキーマ(`schema/workflow.schema.json`)で扱う。`secrets.yaml`の読み込みは未実装である。
+未決事項[Q11](../planning/open-questions.md#q11)で決めたworkflow設定のキーを次に示す。動作規則はリンク先の仕様を主文書とする。これらのキーは設定型(`src/config/model.rs`)、意味検証(`src/config/validate.rs`・`src/config/substitute.rs`)、生成スキーマ(`schema/workflow.schema.json`)で扱う。`secrets.yaml`は`src/config/secrets.rs`で読み込む。
 
 ### commandタスク
 
@@ -163,11 +163,11 @@ secrets:
 | `secrets.<名前>.value`   | 文字列 | 秘密値そのもの                                               |
 | `secrets.<名前>.fromEnv` | 文字列 | Coordinatorの起動元環境変数の名前                            |
 
-ファイルの扱いと権限は[承認と秘密情報](../specs/security.md#secrets)を参照する。
+ファイルがない場合、または`HERDR_PLUGIN_CONFIG_DIR`が未設定の場合は、定義が空であるとみなす。秘密値を参照していなければ失敗しない。解析エラーは値を引用しうるため、行と列だけを報告する。ファイルの扱いと権限は[承認と秘密情報](../specs/security.md#secrets)を参照する。
 
 ## 仕様化の残件
 
-Q11で定めたキーについて、`secrets.yaml`の読み込みが残っている。本文にないキーを推測して追加しない。
+Q11で定めたキーの読み込みと検証は実装済みである。Run開始時の参照確認、Attempt起動直前の解決、ログのマスク登録は、実行機能(段階B)と同時に組み込む。本文にないキーを推測して追加しない。
 
 Rustの設定型(`WorkflowSpec`)から`herdr-workflow schema`コマンドでJSON Schema(`schema/workflow.schema.json`)を生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。この役割分担は`tests/schema_contract.rs`で固定している(構造的に正しいがDAGとして不正な設定がスキーマ検証を通ることを確認し、その意味検証は`plan::compile::compile`が担う)。
 

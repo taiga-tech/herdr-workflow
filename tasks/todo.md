@@ -444,7 +444,7 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - [x] 設定例へretryとmonitorを追加
 - [x] cargo fmt / clippy / test
 - [x] `schema/workflow.schema.json`の再生成
-- [ ] `secrets.yaml`の読み込み(所有者確認に追加依存が必要)
+- [x] `secrets.yaml`の読み込み(所有者確認に追加依存が必要)
 
 ### レビュー
 
@@ -453,3 +453,21 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - 文書検査(docs:test・docs:check相当)はPASS。
 - 後続作業で`static.crates.io`が許可され、cargoを実行した。clippyが`TaskDef`の`large_enum_variant`で失敗したため、`wait_for`を`Option<Box<WaitFor>>`に変更した(入力形式は変わらない)。`cargo fmt --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked`(単体165件・統合10件)が成功。手元のrustcは1.97.0で、`mise.toml`の1.93.1では未確認。
 - `herdr-workflow schema`でスキーマを再生成し、prettierで整形した。`examples/workflow.yaml`は`validate`コマンドと生成スキーマの両方で妥当。`secrets.yaml`の読み込みとHerdr実機試験は未実施。
+
+## secrets.yamlの読み込み
+
+### 仕様と計画
+
+`docs/specs/security.md#secrets`と設定リファレンスの秘密値定義に従い、ファイル読み込み・権限確認・参照確認・解決を`src/config/secrets.rs`へ実装する。Run開始とAttempt起動は未実装のため、呼び出し側への組み込みは段階Bで行う。
+
+- [x] version・名前規則・`value`/`fromEnv`排他・重複キーの検査
+- [x] 開いたファイルの属性で所有者(実効UID)と`0o066`の権限を確認し、権限は変更しない
+- [x] 未定義名をまとめて報告する参照確認と、`fromEnv`の解決
+- [x] 値を`Debug`・エラー・解析エラーへ出さない
+- [x] Rust 1.93.1と1.97.0でfmt・clippy・test
+
+### レビュー
+
+- 実効UIDの取得に`libc::geteuid`を使う。`libc`はCargo.lockに既にある0.2.189を直接依存へ追加した。
+- YAMLの解析エラーは型の誤り等で値を引用しうるため、行と列だけを返す。
+- `cargo test --locked`(単体182件・統合10件)が1.93.1・1.97.0で成功。T36はRun開始・起動証跡・ログへの組み込み後に試験する。Herdr実機は未実施。
