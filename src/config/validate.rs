@@ -1079,10 +1079,13 @@ mod q11_tests {
         );
         let spec = parse(&yaml).unwrap();
         let TaskDef::Command {
-            wait_for: Some(WaitFor::Tcp { host, monitor, .. }),
+            wait_for: Some(wait_for),
             ..
         } = &spec.tasks[&TaskId::from("server")]
         else {
+            panic!("server should have a waitFor");
+        };
+        let WaitFor::Tcp { host, monitor, .. } = wait_for.as_ref() else {
             panic!("server should have a tcp waitFor");
         };
         assert_eq!(host, "127.0.0.1");

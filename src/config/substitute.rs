@@ -217,7 +217,7 @@ pub fn template_fields(spec: &WorkflowSpec) -> Vec<(String, &str)> {
                     fields.push((format!("tasks.{}.env.{key}", task_id.0), value.as_str()));
                 }
             }
-            match wait_for {
+            match wait_for.as_deref() {
                 Some(WaitFor::Http { url, .. }) => {
                     fields.push((format!("tasks.{}.waitFor.url", task_id.0), url.as_str()));
                 }

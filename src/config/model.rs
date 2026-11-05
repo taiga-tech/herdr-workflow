@@ -253,8 +253,9 @@ pub enum TaskDef {
         depends_on: Vec<DependsOn>,
         #[serde(default)]
         timeout_seconds: Option<u64>,
+        /// `TaskDef`の列挙子間の大きさの差を抑えるため箱に入れる。
         #[serde(default)]
-        wait_for: Option<WaitFor>,
+        wait_for: Option<Box<WaitFor>>,
         #[serde(default)]
         stop: Option<StopConfig>,
         #[serde(default)]
