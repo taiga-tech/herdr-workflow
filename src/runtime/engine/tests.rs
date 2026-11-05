@@ -646,3 +646,81 @@ fn stop_reports_and_kills_descendants_that_left_the_group() {
     let state = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
     assert!(state.is_empty() || state.contains(") Z"), "{state}");
 }
+
+/// 最初の保存だけ成功し、以降は失敗する記録先。
+#[derive(Default)]
+struct FailingRecorder {
+    calls: usize,
+    notices: Vec<String>,
+}
+
+impl Recorder for FailingRecorder {
+    fn record(&mut self, _snapshot: &RunSnapshot) -> Result<(), String> {
+        self.calls += 1;
+        if self.calls > 1 {
+            Err("disk full".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn notice(&mut self, message: &str) {
+        self.notices.push(message.to_string());
+    }
+}
+
+#[test]
+fn store_write_failure_stops_new_launches() {
+    // T29: 状態ストアへの書き込みが失敗したら、新しいタスクを起動しない。
+    let fixture = Fixture::new();
+    let yaml = workflow(
+        "",
+        &[
+            job("first", "touch \"$WORK/first\"", ""),
+            job(
+                "second",
+                "touch \"$WORK/second\"",
+                "    dependsOn:\n      - task: first\n        condition: succeeded\n",
+            ),
+        ]
+        .concat(),
+    );
+    let spec = load::load_str(&yaml).unwrap();
+    let inputs = BTreeMap::new();
+    let mut env: EnvMap = std::env::vars_os().collect();
+    env.insert(OsString::from("WORK"), fixture.work().into_os_string());
+    let prepared = session::prepare_run(
+        RunRequest {
+            spec: &spec,
+            plugin_config: &PluginConfig::default(),
+            inputs: &inputs,
+            checkout: &fixture.work(),
+            target: None,
+            bootstrap_only: false,
+            herdr: false,
+            base_env: env,
+            load_secrets: no_secrets(),
+            config_dir: None,
+        },
+        session::new_run_id(),
+    )
+    .unwrap();
+    let (tx, rx) = mpsc::channel();
+    let mut recorder = FailingRecorder::default();
+    let stopper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(2));
+        let _ = tx.send(Control::StopAll);
+    });
+    let report = Engine::new(prepared.config, fixture.state.clone(), &mut recorder, rx).run();
+    stopper.join().unwrap();
+    assert!(
+        recorder
+            .notices
+            .iter()
+            .any(|notice| notice.contains("状態ストア")),
+        "{:?}",
+        recorder.notices
+    );
+    assert!(!fixture.work().join("second").exists());
+    assert_ne!(report.snapshot.outcome, RunOutcome::Succeeded);
+}
