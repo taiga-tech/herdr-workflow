@@ -483,8 +483,9 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - [x] SQLite状態ストア、`launch.json`・`result.json`(M3)
 - [x] Coordinatorと制御ソケット、`up`・`wait`・`status`・`logs`・`stop`・`resume`・`retry`・`doctor`(M4)
 - [x] `attach`のGit照合、`files.copy`、`trust`・`hook`、`cleanup plan`・`remove`(M5の一部)
-- [ ] HerdrAdapter(worktree作成、`layout.apply`、`agent.start`、メタデータ報告)
-- [ ] 状態画面(TUI)とログペイン
+- [x] HerdrAdapter(worktree作成、`layout.apply`、`agent.start`、メタデータ報告)
+- [x] 状態画面(`status --watch`)とログペイン(`logs --follow`)
+- [ ] Herdr実機での受け入れ試験、Agent観測値の追跡、再接続時の照合(T17・T20・T21)
 
 ### レビュー
 

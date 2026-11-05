@@ -56,7 +56,16 @@ developer     running     ready      observed: idle
 
 ### 実装済みの連携
 
-`herdr-plugin.toml`に`[[events]]`で`worktree.created`を登録し、`herdr-workflow hook`が`HERDR_PLUGIN_EVENT`と`HERDR_PLUGIN_EVENT_JSON`を読む。イベントJSONからは`WorktreeInfo`(`path`、`branch`、`is_detached`、`is_linked_worktree`)だけを使い、外側の包み方には依存しない。この形式はHerdr v0.9.5タグの公開文書と`herdr-api.schema.json`、v0.9.0タグの文書で確認したものであり、実機でのイベント配送は試験していない。HerdrAdapter(worktree作成、`layout.apply`による配置、`agent.start`、メタデータ報告)は未実装である。
+`herdr-plugin.toml`に`[[events]]`で`worktree.created`を登録し、`herdr-workflow hook`が`HERDR_PLUGIN_EVENT`と`HERDR_PLUGIN_EVENT_JSON`を読む。イベントJSONからは`WorktreeInfo`(`path`、`branch`、`is_detached`、`is_linked_worktree`)だけを使い、外側の包み方には依存しない。この形式はHerdr v0.9.5タグの公開文書と`herdr-api.schema.json`、v0.9.0タグの文書で確認したものであり、実機でのイベント配送は試験していない。
+
+`up --herdr`(または`attach --herdr`)では、要求元の`HERDR_SOCKET_PATH`へ1行1要求のJSONで次のメソッドを送る(`src/herdr.rs`)。
+
+1. `worktree.mode: create`なら`worktree.create`(`cwd`、`branch`、`base`、`label`、`focus: false`)。応答の`workspace.workspace_id`と`worktree.path`を使い、workspaceを別途作らない。送る前に`pending:<repo>:<branch>`の受付記録を残し、このworktreeの`worktree.created`イベントでは別Runを開始しない(T12)。`attach`では要求元の`HERDR_WORKSPACE_ID`を使う。
+2. 初期化対象のjobが成功した後、設定のtabごとに`layout.apply`(`workspace_id`、`tab_label`、`focus: false`、`root`)を送る。`tab_id`は渡さず、既存のtabを置換しない。分割木の比率は`firstSpan / totalSpan`とする。ログpaneは`herdr-workflow logs RUN --task TASK --follow`、状態paneは`herdr-workflow status RUN --watch`を`command`として起動し、Shell・Agentのpaneはコマンドなしのshellとする。応答の`layout.root`の葉の順序で設定のpane IDとHerdrのpane IDを対応づける。
+3. Agent paneでは`agent.start`(`name`、`kind`、`pane_id`)を送る。プロンプトは送らない。Agentの依存先は初期化対象に限る。
+4. `workspace.report_metadata`で`flow_state`を報告する(失敗しても実行は続ける)。
+
+応答を失った変更要求は再送しない。これらの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認したものであり、偽のHerdrソケットを使う試験(`src/herdr.rs`・`src/coordinator.rs`)で要求形を確認している。Herdr実機、Agentの観測値(`idle`等)の取得、再接続時の照合(T17)は未実装・未試験である。
 
 ## 互換性の記録
 

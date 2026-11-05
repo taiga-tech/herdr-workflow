@@ -12,7 +12,7 @@ updated: '2026-09-12'
 
 ## 未リリース
 
-非対話実行を追加した。`run --target`、`up`、`attach`、`wait`、`status`、`logs`、`stop`、`resume`、`retry`、`cleanup plan`、`remove`(借用checkoutは削除しない)、`trust`、`hook`、`doctor`を使える。Coordinatorは状態ディレクトリごとに一つ自動起動し、SQLiteの状態ストアとUnix domain socketの制御通信を使う。Herdrによるworktree作成、画面構築、Agent起動はまだ行わない。
+非対話実行を追加した。`run --target`、`up`、`attach`、`wait`、`status`、`logs`、`stop`、`resume`、`retry`、`cleanup plan`、`remove`(借用checkoutは削除しない)、`trust`、`hook`、`doctor`を使える。Coordinatorは状態ディレクトリごとに一つ自動起動し、SQLiteの状態ストアとUnix domain socketの制御通信を使う。`up --herdr`では、Herdrでworktreeを作成し、初期化後にtab・paneを配置してAgentを起動する(Herdr実機では未試験)。
 
 ## 文書版0.2 — 2026-09-12
 
