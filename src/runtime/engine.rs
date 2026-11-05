@@ -78,6 +78,8 @@ pub struct RunConfig {
     pub load_secrets: Box<dyn Fn() -> Result<SecretsFile, secrets::SecretsError> + Send>,
     /// checkout実行ロックの名前。初期化対象の実行中だけ保持する。
     pub checkout_lock: Option<String>,
+    /// 再開・再試行時に引き継ぐTaskの状態と説明。ないTaskは未実行から始める。
+    pub initial: BTreeMap<TaskId, (TaskRuntimeState, Option<String>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,15 +285,19 @@ impl<'r> Engine<'r> {
                     TaskLifecycle::Job => ReadinessState::NotApplicable,
                     TaskLifecycle::Service => ReadinessState::Pending,
                 };
+                let (runtime, detail) = config.initial.get(id).cloned().unwrap_or((
+                    TaskRuntimeState {
+                        readiness,
+                        ..TaskRuntimeState::default()
+                    },
+                    None,
+                ));
                 (
                     id.clone(),
                     Slot {
                         prepared: prepared.clone(),
-                        runtime: TaskRuntimeState {
-                            readiness,
-                            ..TaskRuntimeState::default()
-                        },
-                        detail: None,
+                        runtime,
+                        detail,
                         live: None,
                         retry_at: None,
                         pending_stop: None,
@@ -645,9 +651,6 @@ impl<'r> Engine<'r> {
             let mut skip = Vec::new();
             for (id, slot) in &self.slots {
                 if slot.runtime.state != TaskState::Waiting || slot.retry_at.is_some() {
-                    continue;
-                }
-                if !slot.runtime.attempts.is_empty() {
                     continue;
                 }
                 let blocked_by_init = init_failed && !self.config.plan.init_boundary.contains(id);

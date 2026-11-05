@@ -174,6 +174,7 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         },
         load_secrets: Box::new(move || load_secrets()),
         checkout_lock: Some(checkout_lock_name(&checkout)),
+        initial: BTreeMap::new(),
     };
     Ok(PreparedRun {
         config,

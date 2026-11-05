@@ -7,3 +7,4 @@ pub mod process;
 pub mod readiness;
 pub mod session;
 pub mod state_dir;
+pub mod store;

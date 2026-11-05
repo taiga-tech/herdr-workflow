@@ -18,7 +18,7 @@ const MASK: &str = "***";
 /// 1行の上限。超えた分は次のレコードへ分割する。
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Stream {
     Stdout,
