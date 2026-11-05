@@ -142,7 +142,9 @@ impl StateDir {
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, StateDirError> {
         let root = root.into();
         ensure_private_dir(&root)?;
-        Ok(Self { root })
+        let dir = Self { root };
+        dir.ensure_subdir(&dir.resource_locks_dir())?;
+        Ok(dir)
     }
 
     pub fn open_default() -> Result<Self, StateDirError> {

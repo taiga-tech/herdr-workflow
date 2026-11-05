@@ -355,7 +355,7 @@ impl std::io::Write for HashWriter {
     }
 }
 
-fn plan_hash(
+pub(crate) fn plan_hash(
     spec: &WorkflowSpec,
     plugin_config: &PluginConfig,
     resolved: &substitute::ResolvedInputs,

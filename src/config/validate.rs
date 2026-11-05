@@ -131,7 +131,7 @@ pub const MAX_EXECUTION_RETRIES: u32 = 9;
 pub const RETRY_MAX_ATTEMPTS_RANGE: (u32, u32) = (1, 10);
 pub const RETRY_MAX_DELAY_SECONDS: u64 = 3600;
 pub const LOG_PATTERN_MAX_CHARS: usize = 1024;
-const RESERVED_ENV_PREFIX: &str = "HERDR_";
+pub const RESERVED_ENV_PREFIX: &str = "HERDR_";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyPathField {
