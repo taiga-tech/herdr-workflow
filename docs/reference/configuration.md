@@ -102,7 +102,7 @@ limits:
 
 ## Q11で定めた入力形式
 
-未決事項[Q11](../planning/open-questions.md#q11)で決めたworkflow設定のキーを次に示す。動作規則はリンク先の仕様を主文書とする。これらのキーはRustの設定型と生成スキーマへ未反映であり、反映するまで`validate`は未知キーとして拒否する。[examples/workflow.yaml](../../examples/workflow.yaml)へは設定型の実装と同じ変更で追加する。
+未決事項[Q11](../planning/open-questions.md#q11)で決めたworkflow設定のキーを次に示す。動作規則はリンク先の仕様を主文書とする。これらのキーは設定型(`src/config/model.rs`)と意味検証(`src/config/validate.rs`・`src/config/substitute.rs`)で扱う。`schema/workflow.schema.json`の再生成と、`secrets.yaml`の読み込みは未実装である。
 
 ### commandタスク
 
@@ -123,19 +123,19 @@ limits:
 
 `waitFor`は`lifecycle: service`のcommandタスクに指定する。Agentタスクは`waitFor`を持たず、Herdrによる起動・入力準備の確認でreadyとなる。
 
-| 種類          | キー                       | 型                        | 省略時       | 制約                                                     |
-| ------------- | -------------------------- | ------------------------- | ------------ | -------------------------------------------------------- |
-| `http`        | 既存のキー                 | ―                         | ―            | [設定例](../../examples/workflow.yaml)の`server`を参照   |
-| `tcp`         | `host`                     | 文字列                    | `127.0.0.1`  | loopback以外は明示した場合だけ使う                       |
-| `tcp`         | `port`                     | 整数または値置換          | 省略不可     | 置換後に`1..=65535`の整数                                |
-| `tcp`         | `timeoutSeconds`           | 整数                      | 省略不可     | `1`以上                                                  |
-| `tcp`         | `intervalMilliseconds`     | 整数                      | 省略不可     | `1`以上                                                  |
-| `tcp`         | `consecutiveSuccesses`     | 整数                      | 省略不可     | `1`以上                                                  |
-| `log`         | `stream`                   | `stdout`・`stderr`・`any` | `any`        | ―                                                        |
-| `log`         | `pattern`                  | 文字列(正規表現)          | 省略不可     | Rust `regex`の構文。1024文字以下。検証時にコンパイルする |
-| `log`         | `timeoutSeconds`           | 整数                      | 省略不可     | `1`以上                                                  |
-| `http`・`tcp` | `monitor.intervalSeconds`  | 整数                      | 継続確認なし | `1`以上                                                  |
-| `http`・`tcp` | `monitor.failureThreshold` | 整数                      | 継続確認なし | `1`以上                                                  |
+| 種類          | キー                       | 型                        | 省略時       | 制約                                                                       |
+| ------------- | -------------------------- | ------------------------- | ------------ | -------------------------------------------------------------------------- |
+| `http`        | 既存のキー                 | ―                         | ―            | [設定例](../../examples/workflow.yaml)の`server`を参照                     |
+| `tcp`         | `host`                     | 文字列                    | `127.0.0.1`  | loopback以外は明示した場合だけ使う                                         |
+| `tcp`         | `port`                     | 整数または値置換          | 省略不可     | 置換後に`1..=65535`の整数                                                  |
+| `tcp`         | `timeoutSeconds`           | 整数                      | 省略不可     | `1`以上                                                                    |
+| `tcp`         | `intervalMilliseconds`     | 整数                      | 省略不可     | `1`以上                                                                    |
+| `tcp`         | `consecutiveSuccesses`     | 整数                      | 省略不可     | `1`以上                                                                    |
+| `log`         | `stream`                   | `stdout`・`stderr`・`any` | `any`        | ―                                                                          |
+| `log`         | `pattern`                  | 文字列(正規表現)          | 省略不可     | Rust `regex`の構文。1024文字以下。検証時にコンパイルする。値置換を行わない |
+| `log`         | `timeoutSeconds`           | 整数                      | 省略不可     | `1`以上                                                                    |
+| `http`・`tcp` | `monitor.intervalSeconds`  | 整数                      | 継続確認なし | `1`以上                                                                    |
+| `http`・`tcp` | `monitor.failureThreshold` | 整数                      | 継続確認なし | `1`以上                                                                    |
 
 `monitor`は省略可能で、指定する場合は二つのキーを両方書く。`log`に`monitor`を書いた場合は拒否する。動作規則は[観測](../specs/observability.md#readiness-config)を参照する。
 
@@ -167,7 +167,7 @@ secrets:
 
 ## 仕様化の残件
 
-Q11で定めたキーの設定型・意味検証・生成スキーマへの反映が残っている。本文にないキーを推測して追加しない。
+Q11で定めたキーについて、生成スキーマの再生成と`secrets.yaml`の読み込みが残っている。本文にないキーを推測して追加しない。
 
 Rustの設定型(`WorkflowSpec`)から`herdr-workflow schema`コマンドでJSON Schema(`schema/workflow.schema.json`)を生成する。生成物と型を別々に手作業で更新しない。構造検証だけでは、循環依存やgridの分割可能性を検証したことにはならない。この役割分担は`tests/schema_contract.rs`で固定している(構造的に正しいがDAGとして不正な設定がスキーマ検証を通ることを確認し、その意味検証は`plan::compile::compile`が担う)。
 

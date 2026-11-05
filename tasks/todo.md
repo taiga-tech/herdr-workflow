@@ -432,3 +432,22 @@ docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満�
 
 - 文書検査の回帰テストが「未登録ID」をT34固定で作っていたため、上限+1から生成するよう修正した。docs:test相当(5件)、docs:check相当、`--check-migration`がPASS。
 - Rust設定型・生成スキーマ・`examples/workflow.yaml`への反映は未実施(次の作業)。Rust検査とHerdr実機試験は未実施。
+
+## Q11キーの設定型・意味検証への反映
+
+### 仕様と計画
+
+Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と単体テスト(T39相当)を更新する。
+
+- [x] 設定型(script、env値、locks、retry、waitFor tcp/log/monitor、attach)
+- [x] 意味検証と置換後のTCPポート検査、単体テスト
+- [x] 設定例へretryとmonitorを追加
+- [ ] cargo fmt / clippy / test(環境制約で未実行)
+- [ ] `schema/workflow.schema.json`の再生成
+- [ ] `secrets.yaml`の読み込み(所有者確認に追加依存が必要)
+
+### レビュー
+
+- `static.crates.io`がネットワーク設定で拒否され、依存クレートを取得できずcargoを実行できなかった。`rustfmt --edition 2024`で構文と書式のみ確認し、テストが組み立てるYAMLの構造はPyYAMLで確認した。
+- GitHub Actions CIを追加しようとしたが、GitHub Appに`workflows`権限がなくpushが拒否されたため取り消した。
+- 文書検査(docs:test・docs:check相当)はPASS。
