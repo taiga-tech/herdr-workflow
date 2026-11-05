@@ -52,6 +52,10 @@ tasks:
     dependsOn:
       - task: toolchain
         condition: succeeded
+    # ネットワーク由来の一時的な失敗に備え、終了失敗と期限切れだけを再試行する。
+    retry:
+      maxAttempts: 2
+      delaySeconds: 5
 
   generate:
     type: command
@@ -90,6 +94,10 @@ tasks:
       timeoutSeconds: 120
       intervalMilliseconds: 500
       consecutiveSuccesses: 2
+      # ready後も確認を続け、3回連続で失敗したらunreadyにする。
+      monitor:
+        intervalSeconds: 10
+        failureThreshold: 3
     stop:
       graceSeconds: 10
 

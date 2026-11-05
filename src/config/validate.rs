@@ -819,7 +819,10 @@ mod q11_tests {
     use super::*;
 
     const TOOLCHAIN_TAIL: &str = "argv: [mise, install]\n    timeoutSeconds: 600";
-    const SERVER_WAIT_FOR: &str = "    waitFor:\n      type: http\n      url: 'http://127.0.0.1:${inputs.port}/'\n      status: 200\n      timeoutSeconds: 120\n      intervalMilliseconds: 500\n      consecutiveSuccesses: 2\n";
+    /// 設定例のserverのwaitFor(monitorを除く部分)。
+    const SERVER_HTTP_BASE: &str = "    waitFor:\n      type: http\n      url: 'http://127.0.0.1:${inputs.port}/'\n      status: 200\n      timeoutSeconds: 120\n      intervalMilliseconds: 500\n      consecutiveSuccesses: 2\n";
+    /// 設定例のserverのwaitFor全体(コメントとmonitorを含む)。
+    const SERVER_WAIT_FOR: &str = "    waitFor:\n      type: http\n      url: 'http://127.0.0.1:${inputs.port}/'\n      status: 200\n      timeoutSeconds: 120\n      intervalMilliseconds: 500\n      consecutiveSuccesses: 2\n      # ready後も確認を続け、3回連続で失敗したらunreadyにする。\n      monitor:\n        intervalSeconds: 10\n        failureThreshold: 3\n";
 
     fn example_yaml() -> String {
         std::fs::read_to_string(
@@ -1114,7 +1117,7 @@ mod q11_tests {
             })
         ));
         let yaml = with_server_wait_for(&format!(
-            "{SERVER_WAIT_FOR}      monitor:\n        intervalSeconds: 10\n        failureThreshold: 0\n"
+            "{SERVER_HTTP_BASE}      monitor:\n        intervalSeconds: 10\n        failureThreshold: 0\n"
         ));
         assert!(matches!(
             validate_yaml(&yaml),
@@ -1128,7 +1131,7 @@ mod q11_tests {
     #[test]
     fn monitor_requires_both_keys() {
         let yaml = with_server_wait_for(&format!(
-            "{SERVER_WAIT_FOR}      monitor:\n        intervalSeconds: 10\n"
+            "{SERVER_HTTP_BASE}      monitor:\n        intervalSeconds: 10\n"
         ));
         assert!(parse(&yaml).is_err());
     }
