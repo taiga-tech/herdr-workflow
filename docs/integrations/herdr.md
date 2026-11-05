@@ -52,6 +52,12 @@ developer     running     ready      observed: idle
 
 停止、再試行、ログ表示、該当ペインへの移動を提供する。破壊的操作は状態画面からも確認を経て実行する。接続先が応答しない場合は、最終確認時刻を表示して古い状態であることを区別する。
 
+<a id="implemented"></a>
+
+### 実装済みの連携
+
+`herdr-plugin.toml`に`[[events]]`で`worktree.created`を登録し、`herdr-workflow hook`が`HERDR_PLUGIN_EVENT`と`HERDR_PLUGIN_EVENT_JSON`を読む。イベントJSONからは`WorktreeInfo`(`path`、`branch`、`is_detached`、`is_linked_worktree`)だけを使い、外側の包み方には依存しない。この形式はHerdr v0.9.5タグの公開文書と`herdr-api.schema.json`、v0.9.0タグの文書で確認したものであり、実機でのイベント配送は試験していない。HerdrAdapter(worktree作成、`layout.apply`による配置、`agent.start`、メタデータ報告)は未実装である。
+
 ## 互換性の記録
 
 対応下限は未決定。対象Herdr版、APIスキーマの取得結果、CLI/TUI双方のイベント発火、OS、試験日、結果を実装時に記録する。取得できない項目は未確認のまま残す。

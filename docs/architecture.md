@@ -49,6 +49,8 @@ Coordinatorは受付キュー、実行計画、依存判定、所有権、停止
 
 ### TaskRunner
 
+現在の実装では、Attemptごとの監視(子プロセスの終了待ち、出力の取り込み、`launch.json`・`result.json`の書き込み)をCoordinator内のスレッドで行い、別プロセスのTaskRunnerは起動しない。以下は[ADR-0002](decisions/0002-coordinator-runner.md)で提案中の構成である。
+
 コマンドごとに独立したTaskRunnerを起動し、そのTaskRunnerが実際の子プロセスを監視する。Coordinatorの再起動と子プロセスの終了判定を分けるためである。
 
 TaskRunnerはAttempt ID、起動証跡、終了結果、ログ位置を保存する。Coordinatorが停止しても、既に動いているプロセスのログと終了結果を保存できる構成にする。ただしTaskRunner自身の異常終了時まで、プロセスの状態を確定できるとは扱わない。
@@ -81,6 +83,8 @@ hookは環境変数からイベントと対象を受け取り、Coordinatorの�
 設定例から計画を生成し、「初期化失敗時はAgentを起動しない」「serviceのready後にE2Eを実行する」「再開時に既存タスクを二重起動しない」「resumeで既存タブを置換しない」をテストで固定する。その後にHerdrAdapterを接続する。
 
 上記四型と四つの固定動作は`src/config/model.rs`・`src/plan/compile.rs`・`src/state/models.rs`・`src/plan/schedule.rs`の実装と`cargo test`の成功で確認できる。
+
+段階Bでは、状態ディレクトリ、プロセスの起動・識別・停止、ログ、readiness、スケジューラ、SQLiteの状態ストア、Coordinatorと制御ソケット、実行系のCLIを`src/runtime/`・`src/coordinator.rs`・`src/commands.rs`へ実装した。詳細は[実装段階](planning/roadmap.md)を参照する。
 
 続けて、未知キー・重複キー・未定義変数の検出(`src/config/model.rs`・`src/config/validate.rs`)、`${inputs.x}`の値置換(`src/config/substitute.rs`。`${worktree.path}`等の実行時変数は値を解決せず予約名前空間として構文確認のみ行う)、`$HERDR_PLUGIN_CONFIG_DIR/config.yaml`の読み込みと上限検証(`src/config/plugin.rs`)、`$HERDR_PLUGIN_CONFIG_DIR/secrets.yaml`の所有者・権限確認と参照解決(`src/config/secrets.rs`。Run開始とAttempt起動への組み込みは段階B)、bootstrap依存閉包とAgentペイン対応の検証、grid座標の整数overflow、grid寸法上限、tabごとのpane数上限を適用する二分割木への変換と検証(`src/plan/compile.rs`・`src/plan/layout.rs`)、並行実行設定値の意味検証、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)を実装した。HerdrAdapter接続はこの範囲に含めていない。
 

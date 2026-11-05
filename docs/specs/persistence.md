@@ -20,21 +20,22 @@ updated: '2026-11-05'
 
 SQLiteを状態ストアの案とし、Coordinatorの単一書き込み経路で更新する。DBはリポジトリ外のローカル状態ディレクトリへ置く。WSLでWindows側の共有パスにDBを置く構成は、初期の検証対象から外す。
 
-| 保存対象     | 主な項目                                                      |
-| ------------ | ------------------------------------------------------------- |
-| `runs`       | ID、設定ハッシュ、repo、checkout、Herdr接続先、phase、outcome |
-| `tasks`      | Run ID、Task ID、実行定義ハッシュ、依存条件                   |
-| `attempts`   | Attempt ID、Runner情報、PIDと起動証跡、readiness、終了結果    |
-| `resources`  | 種別、外部ID、所有権、作成操作、削除状態                      |
-| `operations` | 受付、開始、外部要求、結果確定、状態不明                      |
-| `events`     | 発生元、Run、順序、受信時刻、正規化したイベント               |
-| `approvals`  | repo、設定ハッシュ、許可内容、承認時刻、有効範囲              |
+| 保存対象      | 主な項目                                                      |
+| ------------- | ------------------------------------------------------------- |
+| `runs`        | ID、設定ハッシュ、repo、checkout、Herdr接続先、phase、outcome |
+| `tasks`       | Run ID、Task ID、実行定義ハッシュ、依存条件                   |
+| `attempts`    | Attempt ID、Runner情報、PIDと起動証跡、readiness、終了結果    |
+| `resources`   | 種別、外部ID、所有権、作成操作、削除状態                      |
+| `operations`  | 受付、開始、外部要求、結果確定、状態不明                      |
+| `events`      | 発生元、Run、順序、受信時刻、正規化したイベント               |
+| `approvals`   | repo、設定ハッシュ、許可内容、承認時刻、有効範囲              |
+| `acceptances` | 自動受付の重複判定キー、保留理由、関連づけたRun               |
 
 秘密値をDBへ保存しない。診断情報にも環境変数全体やコピーしたファイル内容を含めない。
 
-TaskRunnerはDBへ直接書かず、Attempt用の結果ファイルを一時ファイルからの置換で確定する。Coordinatorが取り込む。結果取り込みを繰り返しても同じAttemptの結果を重複適用しない。
+TaskRunnerはDBへ直接書かず、Attempt用の結果ファイルを一時ファイルからの置換で確定する。Coordinatorが取り込む。現在の実装ではTaskRunnerをCoordinator内のスレッドとして動かしており、Coordinatorが異常終了すると結果ファイルを書けない。再起動したCoordinatorは未完了のRunを照合し、記録と一致するプロセスが稼働中なら再起動も停止もせず`unknown`とし、結果ファイルがあればその結果を、どちらもなければ`unknown`を記録する。Runは`phase=stopped, outcome=unknown`となる。結果取り込みを繰り返しても同じAttemptの結果を重複適用しない。
 
-スキーマ版を持ち、更新前にバックアップを作成する。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
+スキーマ版を`PRAGMA user_version`で持ち、更新前に`state.v<旧版>.bak`へバックアップを作成する。現在の版は2である(版2で`approvals`と`acceptances`を追加)。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
 
 <a id="state-directory"></a>
 
@@ -56,7 +57,8 @@ LinuxとmacOSで同じ規則を使う。Windowsネイティブの規則は段階
   coordinator.lock        Coordinatorの排他ロック(OSのファイルロック)
   coordinator.sock        制御用Unix domain socket
   state.db                SQLite
-  runs/<run-id>/attempts/<attempt-id>/
+  locks/<名前>.lock       resource lockとcheckout実行ロック(OSのファイルロック)
+  runs/<run-id>/attempts/<task-id>-<attempt>/
     launch.json           Runnerの起動証跡
     result.json           終了結果(一時ファイルからの置換で確定)
     stdout.log

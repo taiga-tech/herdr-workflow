@@ -46,6 +46,12 @@ updated: '2026-09-16'
 
 これで段階Aとして技術的に実装可能な範囲は完了した。残る未解消項目は`files.copy`の追跡済みファイル判定のみで、これは実際のworktree作成後のGit状態が必要なため、意図的に段階Bのworktree実装時へ持ち越す。段階Aを正式に完了扱いにするのはこの解消後とする。
 
+### 段階B以降の進行状況
+
+段階Bの非対話実行を`src/runtime/`・`src/coordinator.rs`・`src/commands.rs`に実装した。job/serviceの起動と停止(プロセスグループ、猶予後の強制終了、依存の逆順)、readiness(http・tcp・log)とmonitor、期限切れ、jobだけの再試行、失敗伝播と依存喪失時の停止、job・serviceの実行枠、resource lockとcheckout実行ロック、秘密値の解決とログのマスク、Attemptごとのログ、SQLiteの状態ストア、Coordinatorの制御ソケットと再起動時の照合、CLIの`run`・`up`・`wait`・`status`・`logs`・`stop`・`resume`・`retry`・`doctor`がある。Herdrを使わない実プロセスの試験(`src/runtime/engine/tests.rs`・`tests/cli_runtime.rs`)で、T04〜T09、T15、T34〜T36、T38に対応する動作を確認している。TaskRunnerは別プロセスではなくCoordinator内のスレッドであり、[ADR-0002](../decisions/0002-coordinator-runner.md)の分離は実装していない。
+
+段階C・Dのうち、Herdrを必要としない部分として、`attach`のGit照合(T37)、`files.copy`(T22・T23)、承認と`worktree.created`イベントの受付(T11・T24・T25)、`cleanup plan`と削除の保留(T27)を実装した。イベントの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認した範囲に限り、Herdr実機では試験していない。Herdrによるworktree作成、tab・paneの配置、ログ・状態ペイン、Agent起動、メタデータ報告は未実装である。
+
 ## 関連文書
 
 [機能一覧](../features.md) / [未決事項](open-questions.md) / [受け入れ試験](../testing/acceptance.md)

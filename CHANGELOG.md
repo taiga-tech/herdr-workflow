@@ -10,6 +10,10 @@ updated: '2026-09-12'
 
 [文書目次](docs/README.md) · [更新ルール](docs/maintenance.md)
 
+## 未リリース
+
+非対話実行を追加した。`run --target`、`up`、`attach`、`wait`、`status`、`logs`、`stop`、`resume`、`retry`、`cleanup plan`、`remove`(借用checkoutは削除しない)、`trust`、`hook`、`doctor`を使える。Coordinatorは状態ディレクトリごとに一つ自動起動し、SQLiteの状態ストアとUnix domain socketの制御通信を使う。Herdrによるworktree作成、画面構築、Agent起動はまだ行わない。
+
 ## 文書版0.2 — 2026-09-12
 
 固有の仕様を持たない旧設計書パスの案内と、移管時の一回限りの検査結果を削除した。元資料と移行表は監査用に維持し、誤って整形されていた元資料を記録済みの原本へ復元した。
