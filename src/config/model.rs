@@ -137,7 +137,9 @@ pub enum InputDefault {
 pub struct WorktreeConfig {
     pub mode: WorktreeMode,
     /// "${inputs.branch}" のような値置換は生文字列のまま保持する。置換処理は後続段階。
-    pub branch: String,
+    /// `create`では必須、`attach`では省略可能(指定時は対象checkoutのブランチと照合する)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     #[serde(default)]
     pub base: Option<String>,
     #[serde(default)]
@@ -150,8 +152,9 @@ pub struct WorktreeConfig {
 #[serde(rename_all = "camelCase")]
 pub enum WorktreeMode {
     Create,
-    // "attach" はexamples/workflow.yamlに現れず、specs/worktree.mdにも
-    // 入力キーの定義がまだ無いため今回は実装しない(docs/planning/open-questions.md Q11管理)。
+    /// 既存checkoutへRunを関連づける。対象パスは設定に書かず実行時に受け取る
+    /// (docs/specs/worktree.md#attach)。
+    Attach,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
@@ -221,7 +224,7 @@ pub struct DefaultsConfig {
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default, deserialize_with = "no_duplicate_map")]
-    pub env: BTreeMap<String, String>,
+    pub env: BTreeMap<String, EnvValue>,
     #[serde(default)]
     pub job_timeout_seconds: Option<u64>,
 }
@@ -239,9 +242,13 @@ pub enum TaskDef {
     Command {
         lifecycle: TaskLifecycle,
         runner: RunnerKind,
-        argv: Vec<String>,
+        /// `script`と排他で、どちらか一方が必須(意味検証で確認する)。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        argv: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        script: Option<ScriptSpec>,
         #[serde(default, deserialize_with = "no_duplicate_map")]
-        env: BTreeMap<String, String>,
+        env: BTreeMap<String, EnvValue>,
         #[serde(default)]
         depends_on: Vec<DependsOn>,
         #[serde(default)]
@@ -252,6 +259,10 @@ pub enum TaskDef {
         stop: Option<StopConfig>,
         #[serde(default)]
         on_dependency_lost: Option<OnDependencyLost>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locks: Vec<LockName>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry: Option<RetryConfig>,
     },
     #[serde(rename_all = "camelCase")]
     Agent {
@@ -259,6 +270,46 @@ pub enum TaskDef {
         #[serde(default)]
         depends_on: Vec<DependsOn>,
     },
+}
+
+/// シェル経由で実行する本文。`shell`の末尾に`source`を一つの引数として追加して起動する。
+/// どちらにも`${...}`の値置換は行わない(docs/specs/execution.md#script)。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ScriptSpec {
+    pub shell: Vec<String>,
+    pub source: String,
+}
+
+/// 環境変数の値。文字列、秘密値参照、または`null`(継承した値の削除)。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum EnvValue {
+    Value(String),
+    Secret(SecretRef),
+    Unset,
+}
+
+/// `$HERDR_PLUGIN_CONFIG_DIR/secrets.yaml`に定義した秘密値の名前だけを持つ。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SecretRef {
+    pub secret: String,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct LockName(pub String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RetryConfig {
+    /// 初回を含む総Attempt数。
+    pub max_attempts: u32,
+    #[serde(default)]
+    pub delay_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
@@ -300,10 +351,60 @@ pub enum WaitFor {
         timeout_seconds: u64,
         interval_milliseconds: u64,
         consecutive_successes: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        monitor: Option<MonitorConfig>,
     },
-    // Tcp/Log/Agentはspecs/observability.mdに確認方式の説明はあるが
-    // 具体的なキー名が定義されていないため今回は実装しない
-    // (configuration.md「本文にないキーを推測して追加しない」、open-questions.md Q11管理)。
+    #[serde(rename_all = "camelCase")]
+    Tcp {
+        #[serde(default = "default_tcp_host")]
+        host: String,
+        port: PortValue,
+        timeout_seconds: u64,
+        interval_milliseconds: u64,
+        consecutive_successes: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        monitor: Option<MonitorConfig>,
+    },
+    /// `monitor`を持たない。指定した場合は未知キーとして拒否する。
+    #[serde(rename_all = "camelCase")]
+    Log {
+        #[serde(default)]
+        stream: LogStream,
+        pattern: String,
+        timeout_seconds: u64,
+    },
+    // AgentはwaitForを持たず、Herdrの起動確認でreadyとする(docs/specs/observability.md)。
+}
+
+fn default_tcp_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+/// TCPのポート番号。整数、または`${inputs.port}`等の値置換を含む文字列。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum PortValue {
+    Number(i64),
+    Template(String),
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum LogStream {
+    Stdout,
+    Stderr,
+    #[default]
+    Any,
+}
+
+/// ready後の継続確認。両方のキーが必須。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MonitorConfig {
+    pub interval_seconds: u64,
+    pub failure_threshold: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]

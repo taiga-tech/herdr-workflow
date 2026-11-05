@@ -114,7 +114,7 @@ fn duplicate_task_key_in_config_is_rejected_before_compile() {
 #[test]
 fn undefined_input_variable_in_config_is_rejected() {
     let mut spec = load::load_file(example_path()).expect("examples/workflow.yaml should parse");
-    spec.worktree.branch = "${inputs.missing}".to_string();
+    spec.worktree.branch = Some("${inputs.missing}".to_string());
     let err = compile::compile(&spec).expect_err("undefined input variable should be rejected");
     assert!(matches!(err, compile::CompileError::Invalid(_)));
 }
