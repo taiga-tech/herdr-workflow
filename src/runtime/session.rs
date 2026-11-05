@@ -250,6 +250,9 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         checkout_lock: Some(checkout_lock_name(&checkout)),
         initial: BTreeMap::new(),
         on_init_complete: None,
+        agents: BTreeMap::new(),
+        observe_agent: None,
+        agent_poll: std::time::Duration::from_secs(2),
     };
     Ok(PreparedRun {
         config,

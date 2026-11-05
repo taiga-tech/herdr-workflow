@@ -263,6 +263,16 @@ pub fn start_agent(
     Ok(())
 }
 
+/// `agent.get`: Agentの観測値(`agent_status`)を返す。Agentが終了・置換されて名前が
+/// 解決できない場合(`not_found`)は`None`。
+pub fn agent_status(client: &mut HerdrClient, target: &str) -> Result<Option<String>, HerdrError> {
+    match client.request("agent.get", json!({ "target": target })) {
+        Ok(result) => Ok(result["agent"]["agent_status"].as_str().map(str::to_string)),
+        Err(HerdrError::Remote { code, .. }) if code.contains("not_found") => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// `workspace.report_metadata`: workspace単位の集計値を報告する(表示専用)。
 pub fn report_metadata(
     client: &mut HerdrClient,
@@ -308,6 +318,8 @@ pub(crate) mod fake {
     pub struct FakeHerdr {
         pub path: PathBuf,
         pub requests: Arc<Mutex<Vec<Value>>>,
+        /// `agent.get`へ順に返す`agent_status`。尽きたら`not_found`を返す。
+        pub agent_statuses: Arc<Mutex<std::collections::VecDeque<String>>>,
     }
 
     fn pane_ids(node: &Value, next: &mut u32) -> Value {
@@ -331,6 +343,8 @@ pub(crate) mod fake {
             let listener = UnixListener::bind(&path).unwrap();
             let requests = Arc::new(Mutex::new(Vec::new()));
             let log = Arc::clone(&requests);
+            let agent_statuses = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+            let statuses = Arc::clone(&agent_statuses);
             std::thread::spawn(move || {
                 use std::io::{BufRead, BufReader, Write};
                 let mut next = 0;
@@ -343,6 +357,19 @@ pub(crate) mod fake {
                     }
                     let request: Value = serde_json::from_str(&line).unwrap();
                     log.lock().unwrap().push(request.clone());
+                    if request["method"] == "agent.get" {
+                        let response = match statuses.lock().unwrap().pop_front() {
+                            Some(status) => json!({ "id": request["id"], "result": {
+                                "type": "agent_info",
+                                "agent": { "pane_id": "w9:p2", "agent_status": status, "name": request["params"]["target"] }
+                            }}),
+                            None => {
+                                json!({ "id": request["id"], "error": { "code": "not_found", "message": "agent not found" } })
+                            }
+                        };
+                        let _ = stream.write_all(format!("{response}\n").as_bytes());
+                        continue;
+                    }
                     let result = match request["method"].as_str().unwrap() {
                         "worktree.create" => json!({
                             "type": "worktree_created",
@@ -364,7 +391,11 @@ pub(crate) mod fake {
                     let _ = stream.write_all(format!("{response}\n").as_bytes());
                 }
             });
-            Self { path, requests }
+            Self {
+                path,
+                requests,
+                agent_statuses,
+            }
         }
 
         pub fn methods(&self) -> Vec<String> {
@@ -453,6 +484,24 @@ mod tests {
         let request = fake.requests.lock().unwrap()[0].clone();
         assert_eq!(request["params"]["focus"], false);
         assert_eq!(request["params"]["base"], "main");
+    }
+
+    #[test]
+    fn agent_status_maps_not_found_to_none() {
+        let tmp = TempDir::new("herdr");
+        let fake = FakeHerdr::start(tmp.0.join("h.sock"), tmp.0.join("wt"));
+        fake.agent_statuses
+            .lock()
+            .unwrap()
+            .push_back("working".to_string());
+        let mut client = HerdrClient::new(fake.path.clone());
+        assert_eq!(
+            agent_status(&mut client, "developer").unwrap().as_deref(),
+            Some("working")
+        );
+        assert_eq!(agent_status(&mut client, "developer").unwrap(), None);
+        let request = fake.requests.lock().unwrap()[0].clone();
+        assert_eq!(request["params"]["target"], "developer");
     }
 
     #[test]

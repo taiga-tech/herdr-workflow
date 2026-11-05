@@ -11,11 +11,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::config::model::{TaskId, TaskLifecycle};
+use crate::config::model::TaskId;
 use crate::config::{load, plugin};
 use crate::coordinator::{self, Client, CoordinatorError};
 use crate::plan::compile;
-use crate::runtime::engine::{RunOutcome, RunPhase, TaskSnapshot};
+use crate::runtime::engine::{RunOutcome, RunPhase, TaskKind, TaskSnapshot};
 use crate::runtime::logs::{self, Stream};
 use crate::runtime::state_dir::StateDir;
 use crate::runtime::store::{RunRecord, Store};
@@ -486,11 +486,11 @@ fn wait_main(state: &StateDir, args: &Args) -> i32 {
 fn run_is_ready(run: &RunRecord, tasks: &BTreeMap<TaskId, TaskSnapshot>) -> bool {
     run.phase == RunPhase::Active
         && tasks.values().all(|task| match task.kind {
-            TaskLifecycle::Service => {
+            TaskKind::Service | TaskKind::Agent => {
                 task.runtime.state == TaskState::Running
                     && task.runtime.readiness == ReadinessState::Ready
             }
-            TaskLifecycle::Job => !matches!(
+            TaskKind::Job => !matches!(
                 task.runtime.state,
                 TaskState::Failed | TaskState::Unknown | TaskState::Skipped
             ),

@@ -724,3 +724,97 @@ fn store_write_failure_stops_new_launches() {
     assert!(!fixture.work().join("second").exists());
     assert_ne!(report.snapshot.outcome, RunOutcome::Succeeded);
 }
+
+#[test]
+fn agent_observations_are_tracked_without_becoming_task_results() {
+    // T10: Agentのidleをjob成功へ変換しない。照会できないときは観測値をunknownにする。
+    let fixture = Fixture::new();
+    let yaml = workflow(
+        "init",
+        &[
+            job("init", "true", ""),
+            "  developer:\n    type: agent\n    agent:\n      kind: claude\n    dependsOn:\n      - task: init\n        condition: succeeded\n".to_string(),
+        ]
+        .concat(),
+    )
+    .replace(
+        "view: { type: status }",
+        "view: { type: agent, task: developer }",
+    );
+    let spec = load::load_str(&yaml).unwrap_or_else(|error| panic!("{error}\n{yaml}"));
+    let inputs = BTreeMap::new();
+    let mut prepared = session::prepare_run(
+        RunRequest {
+            spec: &spec,
+            plugin_config: &PluginConfig::default(),
+            inputs: &inputs,
+            checkout: &fixture.work(),
+            target: None,
+            bootstrap_only: false,
+            herdr: true,
+            base_env: std::env::vars_os().collect(),
+            load_secrets: no_secrets(),
+            config_dir: None,
+        },
+        session::new_run_id(),
+    )
+    .unwrap();
+    assert_eq!(prepared.agents, [TaskId::from("developer")]);
+    prepared.config.agents = BTreeMap::from([(TaskId::from("developer"), "developer".to_string())]);
+    prepared.config.on_init_complete = Some(Box::new(|| {
+        Ok(InitOutcome {
+            message: "layout".to_string(),
+            agents: BTreeMap::from([(TaskId::from("developer"), Ok("w1:p2".to_string()))]),
+        })
+    }));
+    let probes = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from([
+        AgentProbe::Observed(AgentObservation::Working),
+        AgentProbe::Observed(AgentObservation::Idle),
+        AgentProbe::Unreachable("connection refused".to_string()),
+    ])));
+    prepared.config.observe_agent = Some(Arc::new(move |_| {
+        probes
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(AgentProbe::Observed(AgentObservation::Idle))
+    }));
+    prepared.config.agent_poll = Duration::from_millis(50);
+    let (tx, rx) = mpsc::channel();
+    let stopper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(800));
+        let _ = tx.send(Control::StopAll);
+    });
+    let mut recorder = MemoryRecorder::default();
+    let report = Engine::new(prepared.config, fixture.state.clone(), &mut recorder, rx).run();
+    stopper.join().unwrap();
+    let position = |text: &str| {
+        recorder
+            .notices
+            .iter()
+            .position(|notice| notice.contains(text))
+    };
+    assert!(
+        position("agent working").is_some(),
+        "{:?}",
+        recorder.notices
+    );
+    assert!(position("agent idle") > position("agent working"));
+    assert!(position("agent state unknown") > position("agent idle"));
+    let developer = &report.snapshot.tasks[&TaskId::from("developer")];
+    assert_eq!(developer.kind, TaskKind::Agent);
+    // 停止要求でもAgentのプロセスは止めず、追跡だけを終える。
+    assert_eq!(developer.runtime.state, TaskState::Stopped);
+    assert!(
+        developer
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("keeps running")
+    );
+    assert_eq!(developer.runtime.agent, Some(AgentObservation::Idle));
+    // いずれの観測値でもsucceededにはならない。
+    assert!(recorder.snapshots.iter().all(|snapshot| {
+        snapshot.tasks[&TaskId::from("developer")].runtime.state != TaskState::Succeeded
+    }));
+}

@@ -28,8 +28,8 @@ use crate::runtime::prepare::{self, PreparedTask, Readiness};
 use crate::runtime::process::{self, Exit, LaunchSpec, ProcessHandle, ProcessIdentity};
 use crate::runtime::state_dir::StateDir;
 use crate::state::models::{
-    AttemptId, AttemptOutcome, AttemptResult, LaunchEvidence, LogPosition, ReadinessState,
-    TaskRuntimeState, TaskState,
+    AgentObservation, AttemptId, AttemptOutcome, AttemptResult, LaunchEvidence, LogPosition,
+    ReadinessState, TaskRuntimeState, TaskState,
 };
 
 const TICK: Duration = Duration::from_millis(50);
@@ -82,15 +82,57 @@ pub struct RunConfig {
     pub initial: BTreeMap<TaskId, (TaskRuntimeState, Option<String>)>,
     /// 初期化の成功後、初期化対象でないタスクを起動する前に一度だけ呼ぶ(画面構築)。
     pub on_init_complete: Option<InitHook>,
+    /// Herdrで起動するAgentタスク(Task ID → Agent名)。
+    pub agents: BTreeMap<TaskId, String>,
+    /// Agentの観測値を照会する関数と、その間隔。
+    pub observe_agent: Option<AgentObserver>,
+    pub agent_poll: Duration,
 }
 
-/// 画面構築等の処理。成功時は通知文を返し、失敗するとRunを失敗として停止する。
-pub type InitHook = Box<dyn FnOnce() -> Result<String, String> + Send>;
+/// 画面構築の結果。Agentごとの起動結果(成功時はpane ID、失敗時は理由)を返す。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InitOutcome {
+    pub message: String,
+    pub agents: BTreeMap<TaskId, Result<String, String>>,
+}
+
+/// 画面構築等の処理。失敗するとRunを失敗として停止する。
+pub type InitHook = Box<dyn FnOnce() -> Result<InitOutcome, String> + Send>;
+
+/// Agentの照会結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentProbe {
+    Observed(AgentObservation),
+    /// Agentが終了した、または別のプロセスに置き換わった。
+    Gone,
+    /// Herdrへ照会できない。観測値は`unknown`にする。
+    Unreachable(String),
+}
+
+pub type AgentObserver = Arc<dyn Fn(&str) -> AgentProbe + Send + Sync>;
+
+/// 状態画面と状態ストアで使うTaskの種別。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskKind {
+    Job,
+    Service,
+    Agent,
+}
+
+impl From<TaskLifecycle> for TaskKind {
+    fn from(lifecycle: TaskLifecycle) -> Self {
+        match lifecycle {
+            TaskLifecycle::Job => Self::Job,
+            TaskLifecycle::Service => Self::Service,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
-    pub kind: TaskLifecycle,
+    pub kind: TaskKind,
     pub runtime: TaskRuntimeState,
     pub detail: Option<String>,
 }
@@ -159,6 +201,27 @@ enum Event {
         attempt: u32,
         ok: bool,
     },
+    Agent {
+        task: TaskId,
+        probe: AgentProbe,
+    },
+}
+
+/// HerdrのAgent。プロセスを所有しないため停止信号は送らない。
+struct AgentSlot {
+    name: String,
+    runtime: TaskRuntimeState,
+    detail: Option<String>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl AgentSlot {
+    fn is_terminal(&self) -> bool {
+        !matches!(
+            self.runtime.state,
+            TaskState::Waiting | TaskState::Starting | TaskState::Running | TaskState::Stopping
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,6 +331,7 @@ pub struct Engine<'r> {
     store_degraded: bool,
     checkout_guard: Vec<LockGuard>,
     init_hook: Option<InitHook>,
+    agents: BTreeMap<TaskId, AgentSlot>,
     dirty: bool,
 }
 
@@ -286,6 +350,21 @@ impl<'r> Engine<'r> {
     ) -> Self {
         let mut config = config;
         let init_hook = config.on_init_complete.take();
+        let agents = config
+            .agents
+            .iter()
+            .map(|(id, name)| {
+                (
+                    id.clone(),
+                    AgentSlot {
+                        name: name.clone(),
+                        runtime: TaskRuntimeState::default(),
+                        detail: None,
+                        cancel: Arc::new(AtomicBool::new(false)),
+                    },
+                )
+            })
+            .collect();
         let (events_tx, events_rx) = mpsc::channel();
         let slots = config
             .tasks
@@ -330,6 +409,7 @@ impl<'r> Engine<'r> {
             store_degraded: false,
             checkout_guard: Vec::new(),
             init_hook,
+            agents,
             dirty: true,
         }
     }
@@ -351,12 +431,22 @@ impl<'r> Engine<'r> {
                     (
                         id.clone(),
                         TaskSnapshot {
-                            kind: slot.prepared.lifecycle,
+                            kind: slot.prepared.lifecycle.into(),
                             runtime: slot.runtime.clone(),
                             detail: slot.detail.clone(),
                         },
                     )
                 })
+                .chain(self.agents.iter().map(|(id, agent)| {
+                    (
+                        id.clone(),
+                        TaskSnapshot {
+                            kind: TaskKind::Agent,
+                            runtime: agent.runtime.clone(),
+                            detail: agent.detail.clone(),
+                        },
+                    )
+                }))
                 .collect(),
             updated_at: logs::rfc3339(SystemTime::now()),
         }
@@ -382,6 +472,11 @@ impl<'r> Engine<'r> {
         self.slots
             .iter()
             .map(|(id, slot)| (id.clone(), slot.runtime.clone()))
+            .chain(
+                self.agents
+                    .iter()
+                    .map(|(id, agent)| (id.clone(), agent.runtime.clone())),
+            )
             .collect()
     }
 
@@ -452,13 +547,19 @@ impl<'r> Engine<'r> {
     fn update_phase(&mut self) {
         let before = (self.phase, self.outcome);
         let any_live = self.slots.values().any(Slot::is_live);
-        let all_terminal = self.slots.values().all(Slot::is_terminal);
-        let any_failed = self.slots.values().any(|slot| {
-            matches!(
-                slot.runtime.state,
-                TaskState::Failed | TaskState::Unknown | TaskState::Skipped
-            )
-        });
+        let all_terminal = self.slots.values().all(Slot::is_terminal)
+            && self.agents.values().all(AgentSlot::is_terminal);
+        let any_failed = self
+            .slots
+            .values()
+            .map(|slot| slot.runtime.state)
+            .chain(self.agents.values().map(|agent| agent.runtime.state))
+            .any(|state| {
+                matches!(
+                    state,
+                    TaskState::Failed | TaskState::Unknown | TaskState::Skipped
+                )
+            });
 
         if let Some(kind) = self.stopping_all {
             if !any_live && self.slots.values().all(|slot| slot.retry_at.is_none()) {
@@ -548,6 +649,23 @@ impl<'r> Engine<'r> {
                 slot.runtime.state = TaskState::Cancelled;
                 slot.retry_at = None;
                 slot.detail = Some(reason.to_string());
+            }
+        }
+        // Agentのプロセスとpaneは止めず、追跡だけを終える(paneを閉じる操作と停止を分ける)。
+        for agent in self.agents.values_mut() {
+            agent.cancel.store(true, Ordering::Relaxed);
+            match agent.runtime.state {
+                TaskState::Running => {
+                    agent.runtime.state = TaskState::Stopped;
+                    agent.detail = Some(
+                        "tracking ended; the agent keeps running in its Herdr pane".to_string(),
+                    );
+                }
+                TaskState::Waiting => {
+                    agent.runtime.state = TaskState::Cancelled;
+                    agent.detail = Some(reason.to_string());
+                }
+                _ => {}
             }
         }
         self.dirty = true;
@@ -667,11 +785,15 @@ impl<'r> Engine<'r> {
                 }
                 let blocked_by_init = init_failed && !self.config.plan.init_boundary.contains(id);
                 let blocked = slot.prepared.depends_on.iter().find(|dependency| {
-                    let Some(dep) = self.slots.get(&dependency.task) else {
-                        return false;
+                    let terminal = match (
+                        self.slots.get(&dependency.task),
+                        self.agents.get(&dependency.task),
+                    ) {
+                        (Some(dep), _) => dep.is_terminal(),
+                        (None, Some(agent)) => agent.is_terminal(),
+                        (None, None) => return false,
                     };
-                    let dep_state = &states[&dependency.task];
-                    dep.is_terminal() && !condition_met(dependency.condition, dep_state)
+                    terminal && !condition_met(dependency.condition, &states[&dependency.task])
                 });
                 if blocked_by_init {
                     skip.push((id.clone(), "initialization failed".to_string()));
@@ -683,6 +805,15 @@ impl<'r> Engine<'r> {
                             dependency.task.0, dependency.condition
                         ),
                     ));
+                }
+            }
+            if init_failed {
+                for agent in self.agents.values_mut() {
+                    if agent.runtime.state == TaskState::Waiting {
+                        agent.runtime.state = TaskState::Skipped;
+                        agent.detail = Some("initialization failed".to_string());
+                        self.dirty = true;
+                    }
                 }
             }
             if skip.is_empty() {
@@ -752,7 +883,10 @@ impl<'r> Engine<'r> {
             && let Some(hook) = self.init_hook.take()
         {
             match hook() {
-                Ok(message) => self.notice(message),
+                Ok(outcome) => {
+                    self.notice(outcome.message.clone());
+                    self.start_agent_tracking(outcome.agents);
+                }
                 Err(message) => {
                     self.notice(format!("@layout.create failed: {message}"));
                     self.outcome = RunOutcome::Failed;
@@ -1148,6 +1282,7 @@ impl<'r> Engine<'r> {
                 text,
             } => self.on_line(&task, attempt, stream, &text),
             Event::Probe { task, attempt, ok } => self.on_probe(&task, attempt, ok),
+            Event::Agent { task, probe } => self.on_agent(&task, probe),
             Event::Exited {
                 task,
                 attempt,
@@ -1174,6 +1309,132 @@ impl<'r> Engine<'r> {
                 }
             }
         }
+    }
+
+    /// 画面構築でのAgent起動結果を反映し、観測値の照会を始める。
+    fn start_agent_tracking(&mut self, results: BTreeMap<TaskId, Result<String, String>>) {
+        let now = logs::rfc3339(SystemTime::now());
+        let mut notices = Vec::new();
+        for (id, agent) in &mut self.agents {
+            match results.get(id) {
+                Some(Ok(pane)) => {
+                    // Herdrの`agent.start`は入力準備ができてから成功を返すため、readyとする。
+                    agent.runtime.state = TaskState::Running;
+                    agent.runtime.readiness = ReadinessState::Ready;
+                    agent.runtime.record_attempt_result(AttemptResult {
+                        attempt_id: AttemptId(1),
+                        launch_evidence: LaunchEvidence {
+                            pid: None,
+                            started_at: Some(now.clone()),
+                            command_summary: format!("herdr agent {} in {pane}", agent.name),
+                        },
+                        outcome: AttemptOutcome::Pending,
+                        log_position: LogPosition {
+                            byte_offset: 0,
+                            line_number: 0,
+                        },
+                    });
+                    agent.detail = Some(format!("pane {pane}"));
+                    if let Some(observe) = self.config.observe_agent.clone() {
+                        let tx = self.events_tx.clone();
+                        let task = id.clone();
+                        let name = agent.name.clone();
+                        let cancel = Arc::clone(&agent.cancel);
+                        let interval = self.config.agent_poll;
+                        self.threads.push(std::thread::spawn(move || {
+                            while !cancel.load(Ordering::Relaxed) {
+                                let probe = observe(&name);
+                                let gone = probe == AgentProbe::Gone;
+                                if tx
+                                    .send(Event::Agent {
+                                        task: task.clone(),
+                                        probe,
+                                    })
+                                    .is_err()
+                                    || gone
+                                {
+                                    break;
+                                }
+                                sleep_unless(&cancel, interval);
+                            }
+                        }));
+                    }
+                }
+                Some(Err(reason)) => {
+                    agent.runtime.state = TaskState::Failed;
+                    agent.runtime.readiness = ReadinessState::Unready;
+                    agent.runtime.record_attempt_result(AttemptResult {
+                        attempt_id: AttemptId(1),
+                        launch_evidence: LaunchEvidence {
+                            pid: None,
+                            started_at: Some(now.clone()),
+                            command_summary: format!("herdr agent {}", agent.name),
+                        },
+                        outcome: AttemptOutcome::LaunchFailed(reason.clone()),
+                        log_position: LogPosition {
+                            byte_offset: 0,
+                            line_number: 0,
+                        },
+                    });
+                    agent.detail = Some(format!("agent start failed: {reason}"));
+                    notices.push(format!("[{}] agent start failed: {reason}", id.0));
+                }
+                None => {
+                    agent.runtime.state = TaskState::Skipped;
+                    agent.detail = Some("no agent pane was created".to_string());
+                }
+            }
+        }
+        self.dirty = true;
+        for notice in notices {
+            self.notice(notice);
+        }
+    }
+
+    /// 観測値は別フィールドへ保存し、`idle`や`done`をTaskの成功へ変換しない(T10)。
+    fn on_agent(&mut self, task: &TaskId, probe: AgentProbe) {
+        let Some(agent) = self.agents.get_mut(task) else {
+            return;
+        };
+        if agent.runtime.state != TaskState::Running {
+            return;
+        }
+        let message = match probe {
+            AgentProbe::Observed(observation) => {
+                if agent.runtime.agent == Some(observation) {
+                    return;
+                }
+                agent.runtime.agent = Some(observation);
+                agent.detail = Some(format!("observed: {}", observation_text(observation)));
+                format!("[{}] agent {}", task.0, observation_text(observation))
+            }
+            AgentProbe::Unreachable(reason) => {
+                let changed = agent.runtime.agent != Some(AgentObservation::Unknown);
+                agent.runtime.agent = Some(AgentObservation::Unknown);
+                agent.detail = Some(format!("Herdr unreachable: {reason}"));
+                if !changed {
+                    self.dirty = true;
+                    return;
+                }
+                format!("[{}] agent state unknown: {reason}", task.0)
+            }
+            AgentProbe::Gone => {
+                agent.cancel.store(true, Ordering::Relaxed);
+                agent.runtime.state = TaskState::Stopped;
+                agent.runtime.readiness = ReadinessState::Unready;
+                agent.runtime.agent = None;
+                if let Some(last) = agent.runtime.attempts.last().cloned() {
+                    agent.runtime.record_attempt_result(AttemptResult {
+                        outcome: AttemptOutcome::Unknown,
+                        ..last
+                    });
+                }
+                agent.detail = Some("agent exited or was replaced in its pane".to_string());
+                format!("[{}] agent exited or was replaced", task.0)
+            }
+        };
+        self.dirty = true;
+        self.notice(message);
     }
 
     fn live_mut(&mut self, task: &TaskId, attempt: u32) -> Option<(&mut Slot, bool)> {
@@ -1409,6 +1670,16 @@ impl<'r> Engine<'r> {
         if let Some(notice) = survivor_notice {
             self.notice(notice);
         }
+    }
+}
+
+fn observation_text(observation: AgentObservation) -> &'static str {
+    match observation {
+        AgentObservation::Idle => "idle",
+        AgentObservation::Working => "working",
+        AgentObservation::Blocked => "blocked",
+        AgentObservation::Done => "done",
+        AgentObservation::Unknown => "unknown",
     }
 }
 

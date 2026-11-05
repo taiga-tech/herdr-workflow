@@ -309,6 +309,7 @@ fn layout_hook(
         let exe = exe.display().to_string();
         let mut client = HerdrClient::new(socket);
         let mut summary = Vec::new();
+        let mut started = BTreeMap::new();
         for (tab, planned) in spec.workspace.tabs.iter().zip(&plan_workspace.tabs) {
             let mut panes = BTreeMap::new();
             let mut agent_panes = Vec::new();
@@ -379,16 +380,25 @@ fn layout_hook(
                     _ => continue,
                 };
                 // プロンプトは送らない(設定で明示した場合のみ。初期版は起動だけ)。
-                herdr::start_agent(&mut client, &herdr::agent_name(&task.0), &kind, pane_id)
-                    .map_err(|error| error.to_string())?;
-                summary.push(format!("agent {} started in {pane_id}", task.0));
+                // 1つのAgentの起動失敗はそのTaskの失敗とし、配置済みの画面は残す。
+                let result =
+                    herdr::start_agent(&mut client, &herdr::agent_name(&task.0), &kind, pane_id)
+                        .map(|()| pane_id.clone())
+                        .map_err(|error| error.to_string());
+                if result.is_ok() {
+                    summary.push(format!("agent {} started in {pane_id}", task.0));
+                }
+                started.insert(task, result);
             }
         }
         let tokens = BTreeMap::from([("flow_state".to_string(), "active".to_string())]);
         if let Err(error) = herdr::report_metadata(&mut client, &workspace_id, &tokens) {
             summary.push(format!("metadata not reported: {error}"));
         }
-        Ok(format!("@layout.create: {}", summary.join(", ")))
+        Ok(engine::InitOutcome {
+            message: format!("@layout.create: {}", summary.join(", ")),
+            agents: started,
+        })
     })
 }
 
@@ -532,6 +542,31 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             shared.state.root().to_path_buf(),
             prepared.agents.clone(),
         ));
+        prepared.config.agents = prepared
+            .agents
+            .iter()
+            .map(|task| (task.clone(), crate::herdr::agent_name(&task.0)))
+            .collect();
+        let observe_socket = socket.unwrap_or_default();
+        prepared.config.observe_agent = Some(Arc::new(move |name: &str| {
+            let mut client = crate::herdr::HerdrClient::new(observe_socket.clone());
+            match crate::herdr::agent_status(&mut client, name) {
+                Ok(Some(status)) => serde_json::from_value(Value::String(status)).map_or(
+                    engine::AgentProbe::Observed(crate::state::models::AgentObservation::Unknown),
+                    engine::AgentProbe::Observed,
+                ),
+                Ok(None) => engine::AgentProbe::Gone,
+                Err(error) => engine::AgentProbe::Unreachable(error.to_string()),
+            }
+        }));
+        // 照会間隔(既定2秒)。診断と試験のために要求元の環境で変更できる。
+        if let Some(ms) = start
+            .env
+            .get("HERDR_WORKFLOW_AGENT_POLL_MS")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            prepared.config.agent_poll = Duration::from_millis(ms.max(50));
+        }
     }
 
     let mut store = Store::open(&shared.state.db_path()).map_err(|error| ErrorBody {
@@ -616,7 +651,7 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
                                 (
                                     id.clone(),
                                     engine::TaskSnapshot {
-                                        kind: task.lifecycle,
+                                        kind: task.lifecycle.into(),
                                         runtime: crate::state::models::TaskRuntimeState {
                                             state: TaskState::Skipped,
                                             ..Default::default()
@@ -769,8 +804,17 @@ fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody
         }
         runtime.state = TaskState::Waiting;
         runtime.readiness = match snapshot.kind {
-            crate::config::model::TaskLifecycle::Job => ReadinessState::NotApplicable,
-            crate::config::model::TaskLifecycle::Service => ReadinessState::Pending,
+            engine::TaskKind::Job => ReadinessState::NotApplicable,
+            engine::TaskKind::Service => ReadinessState::Pending,
+            engine::TaskKind::Agent => {
+                return Err(ErrorBody {
+                    code: "unsupported".to_string(),
+                    message: format!(
+                        "run {} has agent task {}; resume and retry of Herdr runs with agents are not supported yet",
+                        record.run_id, id.0
+                    ),
+                });
+            }
         };
         initial.insert(id, (runtime, None));
     }
@@ -909,6 +953,17 @@ pub fn reconcile_orphans(state: &StateDir, store: &mut Store) -> Result<usize, C
         let mut tasks = store.tasks(&run.run_id).map_err(io_err)?;
         for (id, task) in &mut tasks {
             let runtime = &mut task.runtime;
+            // AgentはHerdrのpaneで動き続けるため、追跡が切れたことだけを記録する。
+            if task.kind == engine::TaskKind::Agent {
+                if runtime.state == TaskState::Running {
+                    runtime.state = TaskState::Stopped;
+                    task.detail = Some(
+                        "tracking ended by coordinator restart; the agent may still run in its pane"
+                            .to_string(),
+                    );
+                }
+                continue;
+            }
             match runtime.state {
                 TaskState::Starting | TaskState::Running | TaskState::Stopping => {}
                 TaskState::Waiting => {
@@ -960,13 +1015,11 @@ pub fn reconcile_orphans(state: &StateDir, store: &mut Store) -> Result<usize, C
                 });
             }
             runtime.state = match (task.kind, &outcome) {
-                (crate::config::model::TaskLifecycle::Job, AttemptOutcome::ExitCode(0)) => {
-                    TaskState::Succeeded
-                }
+                (engine::TaskKind::Job, AttemptOutcome::ExitCode(0)) => TaskState::Succeeded,
                 (_, AttemptOutcome::Unknown) => TaskState::Unknown,
                 _ => TaskState::Failed,
             };
-            if task.kind == crate::config::model::TaskLifecycle::Service {
+            if task.kind == engine::TaskKind::Service {
                 runtime.readiness = ReadinessState::Unready;
             }
         }
@@ -1210,6 +1263,11 @@ mod tests {
         let wt = std::fs::canonicalize(tmp.0.join("wt")).unwrap();
         let socket = PathBuf::from(format!("/tmp/hwf-{}.sock", std::process::id()));
         let fake = FakeHerdr::start(socket.clone(), wt.clone());
+        fake.agent_statuses.lock().unwrap().extend(
+            ["working", "working", "idle", "done"]
+                .into_iter()
+                .map(str::to_string),
+        );
 
         let shared = Arc::new(Shared {
             state: StateDir::open(tmp.0.join("state")).unwrap(),
@@ -1223,6 +1281,10 @@ mod tests {
             socket.display().to_string(),
         );
         env.remove("HERDR_WORKSPACE_ID");
+        env.insert(
+            "HERDR_WORKFLOW_AGENT_POLL_MS".to_string(),
+            "100".to_string(),
+        );
         let result = handle_start(
             &shared,
             json!({
@@ -1251,7 +1313,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(wt.join("initialized").exists());
-        let methods = fake.methods();
+        let methods: Vec<String> = fake
+            .methods()
+            .into_iter()
+            .filter(|method| method != "agent.get")
+            .collect();
         assert_eq!(
             methods,
             [
@@ -1261,6 +1327,28 @@ mod tests {
                 "workspace.report_metadata"
             ]
         );
+        // T10: idleやdoneを観測してもTaskの成功へ変換せず、観測値として記録する。
+        let events: Vec<String> = store
+            .events(&run_id, 0)
+            .unwrap()
+            .into_iter()
+            .map(|(_, _, message)| message)
+            .collect();
+        let position = |text: &str| events.iter().position(|event| event.contains(text));
+        assert!(
+            position("[developer] agent working").is_some(),
+            "{events:?}"
+        );
+        assert!(position("[developer] agent idle") > position("[developer] agent working"));
+        assert!(position("[developer] agent done") > position("[developer] agent idle"));
+        assert!(
+            position("agent exited or was replaced").is_some(),
+            "{events:?}"
+        );
+        let tasks = store.tasks(&run_id).unwrap();
+        let developer = &tasks[&TaskId::from("developer")];
+        assert_eq!(developer.kind, engine::TaskKind::Agent);
+        assert_eq!(developer.runtime.state, TaskState::Stopped);
         let requests = fake.requests.lock().unwrap().clone();
         assert_eq!(requests[0]["params"]["branch"], "feature/x");
         assert_eq!(requests[1]["params"]["workspace_id"], "w9");
