@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// 重複キーを検出しない(固定フィールド構造体はserde-deriveが標準で検出する)。
 /// このヘルパーをmapフィールドに`#[serde(deserialize_with = "...")]`で適用し、
 /// 重複キーをエラーにする(T01)。
-fn no_duplicate_map<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+pub(crate) fn no_duplicate_map<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
 where
     D: serde::Deserializer<'de>,
     K: Deserialize<'de> + Ord + fmt::Debug,

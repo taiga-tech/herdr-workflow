@@ -177,7 +177,7 @@ fn validate_worktree(spec: &WorkflowSpec) -> Result<(), ValidateError> {
 }
 
 /// 秘密値名とロック名の共通規則`[a-z0-9][a-z0-9-]*`。
-fn is_valid_resource_name(name: &str) -> bool {
+pub(crate) fn is_valid_resource_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
