@@ -52,7 +52,7 @@ updated: '2026-09-17'
 - `up`は全タスクを対象とするRunを受け付けてRun IDだけを返す。`wait RUN --until ready|finished [--timeout 秒]`で待つ。`ready`は初期化が成功し、Runのserviceがすべて`running`かつ`ready`の状態を指す。
 - `logs RUN --task TASK [--attempt N] [--stream stdout|stderr] [--follow]`は保存したログの表示用テキストを出し、`--json`では記録をそのまま出す。
 - `status`はAgentタスクの観測値(`observed: idle`等)も表示する。
-- `resume RUN`は停止・終了済みのRunを保存済みの計画で再開する。Agentタスクを含むRunの`resume`・`retry`は未対応で、エラーを返す。成功済みのTaskは繰り返さず、状態不明のTaskは起動しない。`retry RUN --task TASK`は指定タスクを新しいAttemptとして実行し、未成功の依存先も再実行する。
+- `resume RUN`は停止・終了済みのRunを保存済みの計画で再開する。Agentタスクを含むRunと、Herdrで画面を配置したRunは、要求元の`HERDR_SOCKET_PATH`を使ってHerdr連携で再開する(動作規則は[復旧](../specs/recovery.md#agent-resume))。成功済みのTaskは繰り返さず、状態不明のTaskは起動しない。`retry RUN --task TASK`は指定タスクを新しいAttemptとして実行し、未成功の依存先も再実行する。
 - `cleanup plan RUN`は対象checkout、ブランチ、追跡ファイルの変更、未追跡ファイル、ignore対象ファイル、稼働中の可能性があるTask、所有workspaceと保留理由を表示する。`remove RUN`は`up --herdr`が作成したworktreeだけを対象とし、保留理由が一つでもあれば何も削除せず終了コード4を返す。条件を満たす場合はHerdrの`worktree.remove`を呼び、ブランチは残す。`status RUN --watch`は1秒ごとに再描画する状態画面である。
 - `trust --config PATH`は承認内容(コマンド、コピー対象、Agent、環境変数名、秘密値名、ロック、HTTP確認先)を表示して承認を記録する。`hook`は承認済みの設定だけを初期化し、未承認では保留して終了コード3を返す。動作規則は[承認と秘密情報](../specs/security.md#approval)を参照する。
 

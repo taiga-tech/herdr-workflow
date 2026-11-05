@@ -66,7 +66,7 @@ developer     running     ready      observed: idle
 4. `workspace.report_metadata`で`flow_state`を報告する(失敗しても実行は続ける)。
 5. 起動したAgentごとに`agent.get`(`target`はAgent名)を一定間隔で送り、応答の`agent.agent_status`(`idle`・`working`・`blocked`・`done`・`unknown`)を観測値として記録する。エラーコードに`not_found`を含む応答はAgentの終了または置換とみなして追跡を終え、それ以外の失敗は観測値を`unknown`にする。照会間隔は既定2秒で、診断のために要求元の環境変数`HERDR_WORKFLOW_AGENT_POLL_MS`で変えられる。
 
-応答を失った変更要求は再送しない。これらの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認したものであり、偽のHerdrソケットを使う試験(`src/herdr.rs`・`src/coordinator.rs`)で要求形を確認している。Herdr実機での動作は未試験であり、再接続時のpane照合(T17)とAgentを含むRunの`resume`・`retry`は未実装である。Coordinatorを再起動すると、Agentタスクは追跡が切れたものとして`stopped`になる。
+応答を失った変更要求は再送しない。これらの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認したものであり、偽のHerdrソケットを使う試験(`src/herdr.rs`・`src/coordinator.rs`)で要求形を確認している。配置したpaneとAgentの対応は状態ストア(`runs.herdr_state`)へ記録し、`resume`・`retry`では`pane.get`と`agent.get`で照合してから使う([復旧](../specs/recovery.md#agent-resume))。Coordinatorを再起動すると、Agentタスクは追跡が切れたものとして`stopped`になり、`resume`で照合できれば追跡を再開する。Herdr実機での動作は未試験である。
 
 ## 互換性の記録
 

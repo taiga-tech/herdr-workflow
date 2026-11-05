@@ -35,7 +35,7 @@ SQLiteを状態ストアの案とし、Coordinatorの単一書き込み経路で
 
 TaskRunnerはDBへ直接書かず、Attempt用の結果ファイルを一時ファイルからの置換で確定する。Coordinatorが取り込む。現在の実装ではTaskRunnerをCoordinator内のスレッドとして動かしており、Coordinatorが異常終了すると結果ファイルを書けない。再起動したCoordinatorは未完了のRunを照合し、記録と一致するプロセスが稼働中なら再起動も停止もせず`unknown`とし、結果ファイルがあればその結果を、どちらもなければ`unknown`を記録する。Runは`phase=stopped, outcome=unknown`となる。結果取り込みを繰り返しても同じAttemptの結果を重複適用しない。
 
-スキーマ版を`PRAGMA user_version`で持ち、更新前に`state.v<旧版>.bak`へバックアップを作成する。現在の版は3である(版2で`approvals`と`acceptances`、版3で`runs.owned_workspace`を追加)。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
+スキーマ版を`PRAGMA user_version`で持ち、更新前に`state.v<旧版>.bak`へバックアップを作成する。現在の版は4である(版2で`approvals`と`acceptances`、版3で`runs.owned_workspace`、版4で`runs.herdr_state`を追加)。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
 
 <a id="state-directory"></a>
 
