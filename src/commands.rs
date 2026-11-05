@@ -150,7 +150,14 @@ pub fn main(args: &[String]) -> i32 {
     match subcommand.as_str() {
         "coordinator" => coordinator_main(&state, &parsed),
         "run" => start_main(&state, &parsed, true),
-        "up" | "attach" => start_main(&state, &parsed, false),
+        "up" => start_main(&state, &parsed, false),
+        "attach" => {
+            if parsed.checkout.is_none() {
+                eprint_error(parsed.json, "cli", "attach requires --checkout PATH");
+                return EXIT_CONFIG;
+            }
+            start_main(&state, &parsed, false)
+        }
         "wait" => wait_main(&state, &parsed),
         "status" => status_main(&state, &parsed),
         "logs" => logs_main(&state, &parsed),

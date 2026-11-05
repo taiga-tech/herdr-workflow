@@ -12,12 +12,13 @@ use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
 
-use crate::config::model::{InputId, TaskDef, TaskId, WorkflowSpec};
+use crate::config::model::{InputId, TaskDef, TaskId, WorkflowSpec, WorktreeMode};
 use crate::config::plugin::PluginConfig;
 use crate::config::secrets::{self, SecretsFile};
 use crate::config::substitute;
 use crate::plan::compile::{self, CompileError, ExecutionPlan, PlannedTaskKind};
 use crate::runtime::engine::{EnvMap, Limits, RunConfig};
+use crate::runtime::git;
 use crate::runtime::prepare::{self, PrepareError};
 
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +37,8 @@ pub enum SessionError {
         "task {0:?} is an agent task; a headless run cannot start agents (use a target whose dependencies are commands only)"
     )]
     HeadlessAgent(String),
+    #[error(transparent)]
+    Git(#[from] git::GitError),
     #[error("checkout {path} is not usable: {message}")]
     Checkout { path: PathBuf, message: String },
 }
@@ -53,6 +56,8 @@ pub struct RunRequest<'a> {
     pub base_env: EnvMap,
     /// 秘密値定義の読み込み口(Run開始時とAttempt起動直前に呼ぶ)。
     pub load_secrets: SecretsLoader,
+    /// workflow設定のあるディレクトリ(同じリポジトリかの確認に使う)。
+    pub config_dir: Option<PathBuf>,
 }
 
 /// Run IDを生成する。時刻(ミリ秒)、PID、連番から作り、辞書順が時刻順になる。
@@ -97,6 +102,10 @@ pub struct PreparedRun {
     pub config: RunConfig,
     pub plan_hash: String,
     pub checkout: PathBuf,
+    /// `files.copy`の設定とコピー元(main worktree)。外部操作なので実行時に行う。
+    pub files: Option<(crate::config::model::FilesConfig, PathBuf)>,
+    /// `attach`で採用した借用checkout。後片付けで削除しない。
+    pub borrowed: bool,
 }
 
 /// checkout実行ロックの名前(正規化したパスのハッシュ)。
@@ -130,6 +139,35 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
     }
     let resolved_inputs = substitute::resolve_inputs(request.spec, request.inputs)?;
     let resolved_values = substitute::substitute_all(request.spec, &resolved_inputs)?;
+
+    // attachは既存checkoutをGit CLIで照合してから採用する(T37)。
+    let expected_branch = resolved_values
+        .0
+        .get("worktree.branch")
+        .filter(|branch| !branch.contains("${"))
+        .cloned();
+    let borrowed = request.spec.worktree.mode == WorktreeMode::Attach;
+    let git_info = if borrowed {
+        Some(git::validate_attach(
+            &checkout,
+            request.config_dir.as_deref(),
+            expected_branch.as_deref(),
+        )?)
+    } else {
+        git::inspect(&checkout).ok()
+    };
+    let files = match &request.spec.files {
+        Some(files) if !files.copy.is_empty() => {
+            let primary = git_info
+                .as_ref()
+                .and_then(|info| info.primary.clone())
+                .ok_or_else(|| git::GitError::NoPrimary {
+                    path: checkout.clone(),
+                })?;
+            Some((files.clone(), primary))
+        }
+        _ => None,
+    };
 
     let selected = select_tasks(&plan, request.target.as_ref());
     for id in &selected {
@@ -180,6 +218,8 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         config,
         plan_hash: hash,
         checkout,
+        files,
+        borrowed,
     })
 }
 

@@ -20,6 +20,13 @@ impl Env {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("work")).unwrap();
+        // attachの対象はGitの作業ツリーでなければならない。
+        let status = Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(root.join("work"))
+            .status()
+            .unwrap();
+        assert!(status.success());
         Self {
             state: root.join("s"),
             root,
@@ -197,4 +204,26 @@ fn retry_runs_a_new_attempt_without_repeating_succeeded_tasks() {
     );
     let count = std::fs::read_to_string(env.root.join("work/setup-count")).unwrap();
     assert_eq!(count, "x\n");
+}
+
+#[test]
+fn attach_rejects_branch_mismatch_before_starting() {
+    // T37: ブランチ不一致ではRunを開始しない。
+    let env = Env::new();
+    let config = env.write_workflow(&job("tests", "touch ran", ""), "");
+    let text = std::fs::read_to_string(&config)
+        .unwrap()
+        .replace("mode: attach\n", "mode: attach\n  branch: feature/other\n");
+    std::fs::write(&config, text).unwrap();
+    let work = env.root.join("work");
+    let output = env.cli(&[
+        "attach",
+        "--config",
+        path(&config),
+        "--checkout",
+        path(&work),
+    ]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("expected \"feature/other\""));
+    assert!(!work.join("ran").exists());
 }

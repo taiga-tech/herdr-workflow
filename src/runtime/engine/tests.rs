@@ -33,7 +33,7 @@ impl Fixture {
 /// tasks部分のYAMLから最小のworkflow設定を作る。
 fn workflow(bootstrap: &str, tasks: &str) -> String {
     format!(
-        "version: 1\nname: test\nworktree:\n  mode: attach\nbootstrap:\n  targets: [{bootstrap}]\ntasks:\n{tasks}\nworkspace:\n  label: test\n  tabs:\n    - id: main\n      label: main\n      layout: {{ type: grid, columns: 1, rows: 1 }}\n      panes:\n        - id: s\n          label: status\n          view: {{ type: status }}\n          placement: {{ column: 1, row: 1 }}\n"
+        "version: 1\nname: test\nworktree:\n  mode: create\n  branch: test\nbootstrap:\n  targets: [{bootstrap}]\ntasks:\n{tasks}\nworkspace:\n  label: test\n  tabs:\n    - id: main\n      label: main\n      layout: {{ type: grid, columns: 1, rows: 1 }}\n      panes:\n        - id: s\n          label: status\n          view: {{ type: status }}\n          placement: {{ column: 1, row: 1 }}\n"
     )
 }
 
@@ -73,6 +73,7 @@ fn run_with(
             target: target.map(TaskId::from),
             base_env: env,
             load_secrets: loader,
+            config_dir: None,
         },
         session::new_run_id(),
     )
@@ -471,6 +472,7 @@ fn undefined_secret_fails_before_any_process_starts() {
             target: Some(TaskId::from("show")),
             base_env: EnvMap::new(),
             load_secrets: no_secrets(),
+            config_dir: None,
         },
         session::new_run_id(),
     )

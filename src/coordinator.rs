@@ -286,6 +286,7 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             target: start.record.target.clone().map(TaskId),
             base_env: env_map(&start.env),
             load_secrets: load_secrets_from_env(&start.env),
+            config_dir: start.record.config_path.parent().map(Path::to_path_buf),
         },
         start.record.run_id.clone(),
     )
@@ -340,8 +341,67 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
     let thread_shared = Arc::clone(shared);
     let state = shared.state.clone();
     let config = prepared.config;
+    let files = prepared.files;
+    let checkout = prepared.checkout;
     let thread_run_id = run_id.clone();
     std::thread::spawn(move || {
+        // @files.copy: 初期化タスクより前に、許可されたファイルだけをコピーする。
+        if let Some((files, source)) = files {
+            match crate::runtime::files::apply(&files, &source, &checkout) {
+                Ok(report) => {
+                    let _ = store.add_event(
+                        &thread_run_id,
+                        &format!(
+                            "@files.copy: copied [{}], skipped [{}]",
+                            report.copied.join(", "),
+                            report
+                                .skipped
+                                .iter()
+                                .map(|(path, reason)| format!("{path}: {reason}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    );
+                }
+                Err(error) => {
+                    let _ =
+                        store.add_event(&thread_run_id, &format!("@files.copy failed: {error}"));
+                    let snapshot = engine::RunSnapshot {
+                        run_id: thread_run_id.clone(),
+                        phase: RunPhase::Finished,
+                        outcome: RunOutcome::Failed,
+                        target: config.target.clone(),
+                        tasks: config
+                            .tasks
+                            .iter()
+                            .map(|(id, task)| {
+                                (
+                                    id.clone(),
+                                    engine::TaskSnapshot {
+                                        kind: task.lifecycle,
+                                        runtime: crate::state::models::TaskRuntimeState {
+                                            state: TaskState::Skipped,
+                                            ..Default::default()
+                                        },
+                                        detail: Some("files.copy failed".to_string()),
+                                    },
+                                )
+                            })
+                            .collect(),
+                        updated_at: logs::rfc3339(SystemTime::now()),
+                    };
+                    let _ = store.save_snapshot(&snapshot);
+                    let _ =
+                        store.add_event(&thread_run_id, "finished: phase=finished outcome=failed");
+                    thread_shared
+                        .runs
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&thread_run_id);
+                    return;
+                }
+            }
+        }
         let mut recorder = StoreRecorder {
             store: &mut store,
             run_id: thread_run_id.clone(),
