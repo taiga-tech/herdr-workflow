@@ -401,3 +401,18 @@ docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満�
 - 独立検証として`cargo test`(単体139件・統合10件)、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`mise run docs:test`(5件)、`mise run docs:check`が全て成功することを確認した。Herdr実機・実Agent起動は未実施。コミットは行っていない。
 
 検証後に記録する。コミットは行わない。
+
+## 段階Bの土台となる設計判断(ADR-0003採用、Q12整理)
+
+### 仕様と計画
+
+利用者の判断：ADR-0003は採用、ADR-0002は具体化してproposed維持、Q12は独自状態ディレクトリ・UDS＋JSON Lines・PID＋起動時刻＋PGIDで決定。Q11・Q13は次回以降。
+
+- [x] Herdr v0.9.0ソースで`HERDR_PLUGIN_STATE_DIR`の配置規則を確認する(herdr.devは本環境から到達不可)
+- [x] ADR-0007を新設し、`docs/specs/persistence.md`に状態ディレクトリ・制御通信・プロセス識別を記載する
+- [x] ADR-0003をaccepted、ADR-0002・Q12・アーキテクチャ・参考資料・manifestを同期する
+- [x] docs:test / docs:check相当とprettierを実行する
+
+### レビュー
+
+- `mise`未導入の環境のため、`mise.toml`のdocs:test / docs:checkと同じuvコマンドを直接実行して成功(5件、PASS)。prettier --checkと`git diff --check`も成功。Rustコードは変更していないためCargo検査は未実施。Herdr実機での環境変数受け渡しは未試験。

@@ -3,7 +3,7 @@ id: ADR-0002
 title: 'ADR-0002：CoordinatorとTaskRunnerの分離'
 status: proposed
 documentVersion: '0.2'
-updated: '2026-09-11'
+updated: '2026-11-05'
 ---
 
 # ADR-0002：CoordinatorとTaskRunnerの分離
@@ -31,6 +31,8 @@ IPC、プロセス起動記録、結果ファイル、再接続が必要にな�
 ## 採用条件
 
 T14、T15、T16、T26、T29の契約試験と、未決事項Q12の整理を行う。現在は`proposed`であり、採用と実機確認が必要である。
+
+Q12は[ADR-0007](0007-state-directory-ipc.md)で整理した。状態ディレクトリ、制御通信、プロセスの識別は[状態ストア](../specs/persistence.md)で定め、この案の採否に関わらず適用する。残る採用条件は上記の契約試験と実機確認である。
 
 ## 関連文書
 

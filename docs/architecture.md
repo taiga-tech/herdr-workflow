@@ -3,7 +3,7 @@ id: DOC-ARCHITECTURE
 title: 'アーキテクチャ'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-16'
+updated: '2026-11-05'
 ---
 
 # アーキテクチャ
@@ -43,7 +43,7 @@ CLI / Herdr action / Herdr event
 
 ### Coordinator
 
-同一ユーザーのプラグイン状態ディレクトリに対して一つ起動する。複数HerdrセッションのRunを扱うが、接続先IDを全操作に付ける。現在フォーカスされているペインへ暗黙に命令を送らない。
+[状態ディレクトリ](specs/persistence.md#state-directory)ごとに一つ起動する。複数HerdrセッションのRunを扱うが、接続先IDを全操作に付ける。現在フォーカスされているペインへ暗黙に命令を送らない。
 
 Coordinatorは受付キュー、実行計画、依存判定、所有権、停止要求を管理する。起動時にOSの排他ロックを取得する。単なるPIDファイルの有無では多重起動を判定しない。
 
