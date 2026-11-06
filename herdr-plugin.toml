@@ -37,3 +37,10 @@ command = ["target/release/herdr-workflow", "hook"]
 [[events]]
 on = "worktree.removed"
 command = ["target/release/herdr-workflow", "hook"]
+
+[[actions]]
+id = "stop"
+title = "Stop workflow runs in this workspace"
+description = "Stop the owned tasks of active runs in the current workspace (worktrees and panes are kept)"
+contexts = ["workspace"]
+command = ["target/release/herdr-workflow", "stop", "--current"]

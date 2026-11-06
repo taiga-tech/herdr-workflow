@@ -70,6 +70,8 @@ struct Args {
     watch: bool,
     /// `--follow`・`--watch`をRunの終了後も続ける(resumeを待つpane用)。
     keep: bool,
+    /// Herdrの現在のworkspaceを対象にする(action用)。
+    current: bool,
     idle_exit: Option<u64>,
 }
 
@@ -122,6 +124,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--herdr" => parsed.herdr = true,
             "--watch" => parsed.watch = true,
             "--keep" => parsed.keep = true,
+            "--current" => parsed.current = true,
             other if other.starts_with("--") => return Err(format!("unknown flag {other:?}")),
             other => parsed.positional.push(other.to_string()),
         }
@@ -402,9 +405,67 @@ fn follow_run(state: &StateDir, client: &mut Client, run_id: &str, json: bool) -
     }
 }
 
+/// `HERDR_WORKSPACE_ID`のworkspaceで稼働中のRun(Herdr actionから使う)。
+fn current_workspace_runs(state: &StateDir) -> Result<Vec<String>, String> {
+    let workspace = std::env::var("HERDR_WORKSPACE_ID")
+        .ok()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            "HERDR_WORKSPACE_ID is not set; run this inside a Herdr workspace".to_string()
+        })?;
+    let store = Store::open(&state.db_path()).map_err(|error| error.to_string())?;
+    runs_in_workspace(&store, &workspace)
+}
+
+fn runs_in_workspace(store: &Store, workspace: &str) -> Result<Vec<String>, String> {
+    Ok(store
+        .recent_runs(1000)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|run| !is_done(run.phase))
+        .filter(|run| {
+            run.owned_workspace.as_deref() == Some(workspace)
+                || run
+                    .herdr_state
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<crate::herdr::HerdrState>(json).ok())
+                    .is_some_and(|herdr| herdr.workspace_id == workspace)
+        })
+        .map(|run| run.run_id)
+        .collect())
+}
+
 fn stop_main(state: &StateDir, args: &Args) -> i32 {
+    if args.current {
+        let runs = match current_workspace_runs(state) {
+            Ok(runs) => runs,
+            Err(message) => {
+                eprint_error(args.json, "stop", &message);
+                return EXIT_CONFIG;
+            }
+        };
+        if runs.is_empty() {
+            println!("この workspace に稼働中のRunはありません");
+            return EXIT_OK;
+        }
+        let mut client = match Client::connect(state) {
+            Ok(client) => client,
+            Err(error) => return remote_exit(args.json, &error),
+        };
+        for run_id in &runs {
+            if let Err(error) = client.call("run.stop", json!({ "runId": run_id })) {
+                return remote_exit(args.json, &error);
+            }
+            println!("停止を要求しました: {run_id}");
+        }
+        return EXIT_OK;
+    }
     let Some(run_id) = args.positional.first() else {
-        eprint_error(args.json, "cli", "RUN is required");
+        eprint_error(
+            args.json,
+            "cli",
+            "RUN (or --current inside Herdr) is required",
+        );
         return EXIT_CONFIG;
     };
     let mut client = match Client::connect(state) {
@@ -1295,5 +1356,54 @@ fn remove_main(state: &StateDir, args: &Args) -> i32 {
             eprint_error(args.json, "remove", &message);
             EXIT_FAILED
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::state_dir::test_support::TempDir;
+
+    #[test]
+    fn runs_are_matched_to_the_current_herdr_workspace() {
+        let tmp = TempDir::new("commands");
+        let store = Store::open(&tmp.0.join("state.db")).unwrap();
+        let herdr = |workspace: &str| {
+            serde_json::to_string(&crate::herdr::HerdrState {
+                workspace_id: workspace.to_string(),
+                ..crate::herdr::HerdrState::default()
+            })
+            .unwrap()
+        };
+        for (id, phase, owned, state) in [
+            ("owned", RunPhase::Active, Some("w1"), None),
+            ("attached", RunPhase::Preparing, None, Some(herdr("w1"))),
+            ("other", RunPhase::Active, None, Some(herdr("w2"))),
+            ("done", RunPhase::Finished, Some("w1"), None),
+            ("headless", RunPhase::Active, None, None),
+        ] {
+            store
+                .insert_run(&RunRecord {
+                    run_id: id.to_string(),
+                    created_at: format!("2026-01-01T00:00:00.000Z{id}"),
+                    updated_at: String::new(),
+                    plan_hash: String::new(),
+                    config_path: PathBuf::from("/c"),
+                    checkout: PathBuf::from("/w"),
+                    target: None,
+                    phase,
+                    outcome: RunOutcome::Pending,
+                    workflow: String::new(),
+                    inputs: Vec::new(),
+                    coordinator_pid: None,
+                    plugin_config: String::new(),
+                    owned_workspace: owned.map(str::to_string),
+                    herdr_state: state,
+                })
+                .unwrap();
+        }
+        let mut found = runs_in_workspace(&store, "w1").unwrap();
+        found.sort();
+        assert_eq!(found, ["attached", "owned"]);
     }
 }

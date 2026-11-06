@@ -83,7 +83,7 @@ herdr-workflow stop RUN_ID
 
 機械向け出力は`--json`で提供し、ログや進捗文を混在させない。引数解析エラーも`--json`指定時はJSON、それ以外は`エラー(cli): ...`形式で出力する。オプション値として渡した`--json`は出力形式の指定とは扱わない。`plan --json`の`plan.tasks`はTask IDをキーとし、各値に重複する`id`フィールドを持たない。終了コードは、0が操作成功、2が設定不正、3が承認待ち、4が実行失敗、5が接続・互換性エラー、6が状態不明または照合待ち、130が利用者の中止とする。生の子プロセス終了コードは結果オブジェクトにも保存する。
 
-Herdr actionは`up / status / stop / validate / cleanup-review`を入口とし、実処理は同じCLIとCoordinatorへ集約する。選択式の操作は、manifestで宣言した端末画面を開いて入力を受け取る。
+Herdr actionは`up / status / stop / validate / cleanup-review`を入口とし(実装済みは`validate`・`status`・`stop`。`stop`は`stop --current`で、`HERDR_WORKSPACE_ID`のworkspaceで稼働中のRunを停止する。入力を選ぶ`up`と`cleanup-review`は選択用の端末画面とともに追加する)、実処理は同じCLIとCoordinatorへ集約する。選択式の操作は、manifestで宣言した端末画面を開いて入力を受け取る。
 
 `herdr-plugin.toml`(Herdr v0.9.0で実機確認済み。[S1](../reference/sources.md#s1)[S2](../reference/sources.md#s2))は、1エントリごとに`id`・`title`・`command`(argv形式)・`contexts`(`global`/`workspace`/`tab`/`pane`/`selection`)を持つ`[[actions]]`でHerdr actionを宣言する。Herdr側はaction idを`<plugin_id>.<id>`へ修飾するため、manifest内のidは`.`を含まない`[A-Za-z0-9:_-]`にする。選択式の端末画面は`[[panes]]`(`id`・`title`・`command`・`placement`)で宣言し、`placement`は`overlay`(既定)/`popup`/`split`/`tab`/`zoomed`から選ぶ。manifestの`min_herdr_version`はセマンティックバージョニング文字列の必須フィールドで、Herdrは指定バージョンより古い自分自身へのlink/installを拒否する。対応下限の具体的な値は互換性試験後に決める。
 
