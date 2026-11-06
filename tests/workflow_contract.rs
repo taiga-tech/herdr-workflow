@@ -83,6 +83,28 @@ fn binary_reads_plugin_config_from_environment() {
 }
 
 #[test]
+fn workspace_pane_total_is_limited_before_layout() {
+    let spec = load::load_file(example_path()).expect("examples/workflow.yaml should parse");
+    let total: usize = spec.workspace.tabs.iter().map(|tab| tab.panes.len()).sum();
+    assert!(total > 1);
+    let plugin = herdr_workflow::config::plugin::load_str(&format!(
+        "version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: {}\n",
+        total - 1
+    ))
+    .unwrap();
+    let error = compile::compile_with_plugin_config(&spec, &plugin).unwrap_err();
+    assert!(
+        error.to_string().contains("maxPanesPerWorkspace"),
+        "{error}"
+    );
+    let plugin = herdr_workflow::config::plugin::load_str(&format!(
+        "version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: {total}\n"
+    ))
+    .unwrap();
+    compile::compile_with_plugin_config(&spec, &plugin).expect("limit equal to the total passes");
+}
+
+#[test]
 fn unknown_top_level_key_is_rejected() {
     let base = std::fs::read_to_string(example_path()).unwrap();
     let yaml = format!("{base}\nunknownTopLevelKey: true\n");

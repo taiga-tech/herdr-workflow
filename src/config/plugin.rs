@@ -13,6 +13,9 @@ pub const DEFAULT_MAX_GRID_DIMENSION: u32 = 64;
 pub const MAX_CONFIGURABLE_GRID_DIMENSION: u32 = 64;
 pub const DEFAULT_MAX_PANES_PER_TAB: u32 = 32;
 pub const MAX_CONFIGURABLE_PANES_PER_TAB: u32 = 32;
+/// workspace全体(全tabの合計)のpane数。Herdrへの配置要求の総量を抑える(Q10)。
+pub const DEFAULT_MAX_PANES_PER_WORKSPACE: u32 = 128;
+pub const MAX_CONFIGURABLE_PANES_PER_WORKSPACE: u32 = 128;
 pub const MIN_LOG_FILE_BYTES: u64 = 1024 * 1024;
 pub const MAX_LOG_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_RETENTION_DAYS: u32 = 3650;
@@ -38,6 +41,11 @@ impl PluginConfig {
     #[must_use]
     pub fn max_panes_per_tab(&self) -> u32 {
         self.limits.layout.max_panes_per_tab
+    }
+
+    #[must_use]
+    pub fn max_panes_per_workspace(&self) -> u32 {
+        self.limits.layout.max_panes_per_workspace
     }
 
     /// Attemptのログ1ファイルの上限(バイト)。
@@ -94,6 +102,13 @@ impl TryFrom<RawPluginConfig> for PluginConfig {
             return Err(PluginConfigError::InvalidMaxPanesPerTab {
                 value,
                 max: MAX_CONFIGURABLE_PANES_PER_TAB,
+            });
+        }
+        let value = raw.limits.layout.max_panes_per_workspace;
+        if !(1..=MAX_CONFIGURABLE_PANES_PER_WORKSPACE).contains(&value) {
+            return Err(PluginConfigError::InvalidMaxPanesPerWorkspace {
+                value,
+                max: MAX_CONFIGURABLE_PANES_PER_WORKSPACE,
             });
         }
         let logs = &raw.logs;
@@ -173,6 +188,7 @@ struct LimitsConfig {
 struct LayoutLimits {
     max_grid_dimension: u32,
     max_panes_per_tab: u32,
+    max_panes_per_workspace: u32,
 }
 
 impl Default for LayoutLimits {
@@ -180,6 +196,7 @@ impl Default for LayoutLimits {
         Self {
             max_grid_dimension: DEFAULT_MAX_GRID_DIMENSION,
             max_panes_per_tab: DEFAULT_MAX_PANES_PER_TAB,
+            max_panes_per_workspace: DEFAULT_MAX_PANES_PER_WORKSPACE,
         }
     }
 }
@@ -206,6 +223,8 @@ pub enum PluginConfigError {
     InvalidMaxGridDimension { value: u32, max: u32 },
     #[error("limits.layout.maxPanesPerTab must be between 1 and {max}, got {value}")]
     InvalidMaxPanesPerTab { value: u32, max: u32 },
+    #[error("limits.layout.maxPanesPerWorkspace must be between 1 and {max}, got {value}")]
+    InvalidMaxPanesPerWorkspace { value: u32, max: u32 },
     #[error("logs.maxFileBytes must be between 1 MiB and 1 GiB, got {value}")]
     InvalidLogFileBytes { value: u64 },
     #[error("logs.generations must be between 1 and {max}, got {value}")]
@@ -367,6 +386,25 @@ mod tests {
             err,
             PluginConfigError::InvalidMaxPanesPerTab { value: 0, .. }
         ));
+    }
+
+    #[test]
+    fn workspace_pane_limit_can_only_be_lowered() {
+        let config = load_str("version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: 8\n")
+            .expect("lowered workspace limit should load");
+        assert_eq!(config.max_panes_per_workspace(), 8);
+        assert_eq!(
+            PluginConfig::default().max_panes_per_workspace(),
+            DEFAULT_MAX_PANES_PER_WORKSPACE
+        );
+        for value in [0, MAX_CONFIGURABLE_PANES_PER_WORKSPACE + 1] {
+            let yaml =
+                format!("version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: {value}\n");
+            assert!(matches!(
+                load_str(&yaml),
+                Err(PluginConfigError::InvalidMaxPanesPerWorkspace { .. })
+            ));
+        }
     }
 
     #[test]

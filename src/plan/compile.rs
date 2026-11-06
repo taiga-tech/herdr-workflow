@@ -94,6 +94,10 @@ pub enum CompileError {
     },
     #[error("agent task {task:?} must have exactly one agent pane, found {count}")]
     InvalidAgentPaneCount { task: TaskId, count: usize },
+    #[error(
+        "workspace has {count} panes in total, more than limits.layout.maxPanesPerWorkspace ({max})"
+    )]
+    TooManyPanesInWorkspace { count: usize, max: u32 },
     #[error(transparent)]
     Invalid(#[from] ValidateError),
     #[error(transparent)]
@@ -194,6 +198,16 @@ pub fn compile_with_plugin_config(
     let init_boundary = compute_init_boundary(&tasks, &bootstrap_targets)?;
 
     validate_agent_panes(&spec.workspace.tabs, &tasks)?;
+
+    // tabごとの上限に加え、全tabの合計も配置要求の前に制限する(Q10)。
+    let total: usize = spec.workspace.tabs.iter().map(|tab| tab.panes.len()).sum();
+    let max_total = plugin_config.max_panes_per_workspace();
+    if u32::try_from(total).map_or(true, |count| count > max_total) {
+        return Err(CompileError::TooManyPanesInWorkspace {
+            count: total,
+            max: max_total,
+        });
+    }
 
     let mut planned_tabs = Vec::with_capacity(spec.workspace.tabs.len());
     for tab in &spec.workspace.tabs {
