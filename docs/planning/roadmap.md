@@ -28,7 +28,7 @@ updated: '2026-09-16'
 
 段階AとBはHerdrなしでも試験する。Herdr統合に必要なAPIの調査は並行して行い、公開前にはCとDを含む受け入れ条件を満たす。
 
-詳細なTask一覧のネイティブサイドバー追加は、公開APIだけで扱える範囲が確認できた後、またはHerdr本体への変更案として別途進める。状態画面の提供をその判断待ちにしない。
+詳細なTask一覧のネイティブサイドバー追加は、Herdr v0.9.5の公開APIに手段がないため提供せず、Herdr本体への変更案として扱う。サイドバーには集計値をtokenで報告する([Herdr連携](../integrations/herdr.md#sidebar-tokens))。
 
 ## 進捗の記録
 
@@ -51,6 +51,8 @@ updated: '2026-09-16'
 段階Bの非対話実行を`src/runtime/`・`src/coordinator.rs`・`src/commands.rs`に実装した。job/serviceの起動と停止(プロセスグループ、猶予後の強制終了、依存の逆順)、readiness(http・tcp・log)とmonitor、期限切れ、jobだけの再試行、失敗伝播と依存喪失時の停止、job・serviceの実行枠、resource lockとcheckout実行ロック、秘密値の解決とログのマスク、Attemptごとのログ、SQLiteの状態ストア、Coordinatorの制御ソケットと再起動時の照合、CLIの`run`・`up`・`wait`・`status`・`logs`・`stop`・`resume`・`retry`・`doctor`がある。Herdrを使わない実プロセスの試験(`src/runtime/engine/tests.rs`・`tests/cli_runtime.rs`)で、T04〜T09、T15、T34〜T36、T38に対応する動作を確認している。TaskRunnerは[ADR-0002](../decisions/0002-coordinator-runner.md)に従ってAttemptごとの別プロセスとし、Coordinatorを強制終了して再起動しても稼働中のjobを重複起動せず、確定した結果を取り込むことを統合試験で確認している(T15)。
 
 段階C・Dのうち、Herdrを必要としない部分として、`attach`のGit照合(T37)、`files.copy`(T22・T23)、承認と`worktree.created`イベントの受付(T11・T24・T25)、`cleanup plan`と削除の保留(T27)を実装した。イベントの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認した範囲に限り、Herdr実機では試験していない。Herdr連携として、`up --herdr`によるworktree作成、初期化後の`layout.apply`による配置、ログ・状態pane、`agent.start`、メタデータ報告、所有worktreeの`remove`を実装した。Agentの観測値は`agent.get`で追跡し、`idle`等をTaskの成功へ変換しない(T10)。`resume`・`retry`では記録したpaneを照合してから使い、配置済みのtabを作り直さない(T17・T20に対応する動作)。Herdr実機では試験していない。
+
+段階Eのうち、Windowsネイティブ以外を実装した(Windowsネイティブは利用者の指示で保留)。対話コマンドの`runner: pty`と`term`([ADR-0008](../decisions/0008-pty-runner.md)、T40〜T43)、branch別の`profiles`(T44)、Herdrプラグインのactionを実行記録で完了確認する`herdrAction`と他プラグインの警告(T45・T46)がある。Linuxの実プロセスと偽のHerdrソケットで試験しており、macOSとHerdr実機では試験していない。
 
 ## 関連文書
 

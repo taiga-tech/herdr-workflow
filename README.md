@@ -14,7 +14,7 @@ updated: '2026-11-06'
 
 Herdrで、worktreeの準備、開発環境の初期化、タスクの依存関係、画面配置、コマンドとAgentの実行状態を一つのworkflowとして管理するプラグインを開発するリポジトリ。
 
-実装言語はRust。設定の検証と計画(`validate`・`plan`)、Herdrなしの非対話実行(`run`・`up`・`status`・`logs`・`stop`等)、Herdr連携(`up --herdr`、worktreeイベントの受付)を実装している。Herdr実機での受け入れ試験はまだ行っていない。コマンドは[CLIとHerdr action](docs/reference/cli.md#implemented)、進み具合は[実装段階](docs/planning/roadmap.md)を参照する。仕様やADRの採用状態は各文書の`status`で確認し、実装済みの範囲はコードと試験結果を根拠に判断する。
+実装言語はRust。設定の検証と計画(`validate`・`plan`)、Herdrなしの非対話実行(`run`・`up`・`status`・`logs`・`stop`等)、Herdr連携(`up --herdr`、worktreeイベントの受付)、対話コマンド(`runner: pty`と`term`)、branch別の`profiles`、他のHerdrプラグインのactionを呼ぶ`herdrAction`を実装している。Herdr実機での受け入れ試験はまだ行っていない。コマンドは[CLIとHerdr action](docs/reference/cli.md#implemented)、進み具合は[実装段階](docs/planning/roadmap.md)を参照する。仕様やADRの採用状態は各文書の`status`で確認し、実装済みの範囲はコードと試験結果を根拠に判断する。
 
 ## 開発の入口
 

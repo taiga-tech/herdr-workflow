@@ -551,3 +551,20 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 
 - 状態ストアは版6。版4以前の承認はhook・フィルターの要約を持たないため再承認が必要になる。
 - `cargo fmt`・`clippy -D warnings`・`cargo test --locked`(単体271件、統合12＋3＋8件)がRust 1.93.1と1.97.0で成功。文書検査(通常・移行監査)とprettierも成功。Herdr実機での確認は行っていない。
+
+## このセッションで完了できる残件(Windowsネイティブ以外)
+
+利用者の判断：段階EはWindows以外を進める。Herdrのリリースバイナリの取得と実行は許可。CIは雛形をリポジトリ内の別の場所に置く。
+
+- [x] CI雛形(`ci/github-actions.yml`)と開発ガイドの移し方
+- [x] Q01: 名前の重複調査。公開名`herdr-taskflow`、改名は公開前にリポジトリ名とあわせて行う
+- [x] Q03: サイドバーへ集計tokenを報告(v0.9.5文書で確認)
+- [x] Q04: `runner: pty`と`term`(ADR-0008、T40〜T43)
+- [x] Q08: `profiles`、`herdrAction`、他プラグインの警告(T44〜T46)
+- [ ] Herdr実機の受け入れ試験：GitHubリポジトリ`herdrdev/herdr`の追加(`add_repo`)が自動判定で拒否され、`herdr.dev`はプロキシで遮断されたため、バイナリを取得できなかった
+- [ ] Windowsネイティブ(Q05・Q12)：保留
+
+### レビュー
+
+- `cargo fmt`・`clippy -D warnings`・`cargo test --locked`がRust 1.93.1と1.97.0で成功。文書検査(通常・移行監査)とprettierも成功。
+- 擬似端末の試験は8回連続、`term`の結合試験は5回連続で成功した。
