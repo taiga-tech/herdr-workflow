@@ -68,19 +68,26 @@ limits:
     layout:
         maxGridDimension: 64
         maxPanesPerTab: 32
+logs:
+    maxFileBytes: 20971520
+    generations: 5
 ```
 
 `version`はプラグイン全体設定のスキーマ版であり、workflow設定の`version`およびプラグインのリリース番号とは別に管理する。設定キーはcamelCaseとする。将来の設定は責務ごとのトップレベル領域へ追加し、無関係な値を`limits`へ混在させない。
 
 ### プラグイン全体設定のキー
 
-| キー                             | 型   | 省略時           | 許容範囲 | 意味                                                  |
-| -------------------------------- | ---- | ---------------- | -------- | ----------------------------------------------------- |
-| `version`                        | 整数 | 省略不可         | `1`      | プラグイン全体設定のスキーマ版                        |
-| `limits`                         | map  | 各組み込み既定値 | ―        | 資源消費を制限する設定群                              |
-| `limits.layout`                  | map  | 各組み込み既定値 | ―        | レイアウト検証の上限                                  |
-| `limits.layout.maxGridDimension` | 整数 | `64`             | `1..=64` | 一つのgridで許可する`columns`と`rows`それぞれの最大値 |
-| `limits.layout.maxPanesPerTab`   | 整数 | `32`             | `1..=32` | 一つのtabで許可するpane数の最大値                     |
+| キー                             | 型   | 省略時             | 許容範囲     | 意味                                                                                |
+| -------------------------------- | ---- | ------------------ | ------------ | ----------------------------------------------------------------------------------- |
+| `version`                        | 整数 | 省略不可           | `1`          | プラグイン全体設定のスキーマ版                                                      |
+| `limits`                         | map  | 各組み込み既定値   | ―            | 資源消費を制限する設定群                                                            |
+| `limits.layout`                  | map  | 各組み込み既定値   | ―            | レイアウト検証の上限                                                                |
+| `limits.layout.maxGridDimension` | 整数 | `64`               | `1..=64`     | 一つのgridで許可する`columns`と`rows`それぞれの最大値                               |
+| `limits.layout.maxPanesPerTab`   | 整数 | `32`               | `1..=32`     | 一つのtabで許可するpane数の最大値                                                   |
+| `logs`                           | map  | 各組み込み既定値   | ―            | Attemptログの大きさと保持                                                           |
+| `logs.maxFileBytes`              | 整数 | `20971520`(20 MiB) | 1 MiB〜1 GiB | 1ファイルの上限。超えたら世代を回す                                                 |
+| `logs.generations`               | 整数 | `5`                | `1..=20`     | 現在のファイルを含む世代数                                                          |
+| `logs.retentionDays`             | 整数 | 削除しない         | `1..=3650`   | 終了・停止から指定日数を過ぎたRunのAttemptファイルを、Coordinatorの起動時に削除する |
 
 `maxGridDimension`と`maxPanesPerTab`は、利用者がそれぞれ組み込み安全上限64と32を引き下げるための運用上限であり、設定によって安全上限を超える値へ緩和できない。workflow内のいずれかのgridで`columns`または`rows`が有効な`maxGridDimension`を超えた場合、またはtabのpane数が有効な`maxPanesPerTab`を超えた場合は、重複検査やペイン配置を開始する前に拒否する。上限を引き上げる場合は、grid面積、pane数、重複検査と境界探索の時間、およびHerdr側の実動作を測定してから契約を変更する。
 

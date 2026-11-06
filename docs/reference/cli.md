@@ -50,10 +50,10 @@ updated: '2026-09-17'
 - 対象checkoutは`--checkout PATH`(省略時は現在のディレクトリ)とする。`worktree.mode: attach`ではGit CLIで照合し、別リポジトリ、ブランチ不一致、detached HEADを拒否する。`worktree.mode: create`の設定でも、headlessでは指定したcheckoutを借用して実行し、新しいworktreeは作らない。
 - `run --target TASK`は対象とその依存先、初期化対象だけを実行し、対象の結果が確定したら残りの所有タスクを依存の逆順に停止して終了する。進捗は標準エラー、結果は標準出力(`--json`でJSON)へ出す。Ctrl+Cで停止を要求し、終了コード130を返す。
 - `up`は全タスクを対象とするRunを受け付けてRun IDだけを返す。`wait RUN --until ready|finished [--timeout 秒]`で待つ。`ready`は初期化が成功し、Runのserviceがすべて`running`かつ`ready`の状態を指す。
-- `logs RUN --task TASK [--attempt N] [--stream stdout|stderr] [--follow]`は保存したログの表示用テキストを出し、`--json`では記録をそのまま出す。
+- `logs RUN --task TASK [--attempt N] [--stream stdout|stderr] [--follow [--keep]]`は保存したログの表示用テキストを出し、`--json`では記録をそのまま出す。`--follow`は自動再試行の新しいAttemptも区切り行を付けて続けて表示し、Taskの結果が確定するかRunが終わると終える。`--keep`を付けるとRunの終了後も終えず、`resume`・`retry`の新しいAttemptを待つ。
 - `status`はAgentタスクの観測値(`observed: idle`等)も表示する。
 - `resume RUN`は停止・終了済みのRunを保存済みの計画で再開する。Agentタスクを含むRunと、Herdrで画面を配置したRunは、要求元の`HERDR_SOCKET_PATH`を使ってHerdr連携で再開する(動作規則は[復旧](../specs/recovery.md#agent-resume))。成功済みのTaskは繰り返さず、状態不明のTaskは起動しない。`retry RUN --task TASK`は指定タスクを新しいAttemptとして実行し、未成功の依存先も再実行する。
-- `cleanup plan RUN`は対象checkout、ブランチ、追跡ファイルの変更、未追跡ファイル、ignore対象ファイル、稼働中の可能性があるTask、所有workspaceと保留理由を表示する。`remove RUN`は`up --herdr`が作成したworktreeだけを対象とし、保留理由が一つでもあれば何も削除せず終了コード4を返す。条件を満たす場合はHerdrの`worktree.remove`を呼び、ブランチは残す。`status RUN --watch`は1秒ごとに再描画する状態画面である。
+- `cleanup plan RUN`は対象checkout、ブランチ、追跡ファイルの変更、未追跡ファイル、ignore対象ファイル、稼働中の可能性があるTask、所有workspaceと保留理由を表示する。`remove RUN`は`up --herdr`が作成したworktreeだけを対象とし、保留理由が一つでもあれば何も削除せず終了コード4を返す。条件を満たす場合はHerdrの`worktree.remove`を呼び、ブランチは残す。`status RUN --watch [--keep]`は1秒ごとに再描画する状態画面であり、`--keep`ではRunの終了後も再描画を続ける。
 - `trust --config PATH`は承認内容(コマンド、コピー対象、Agent、環境変数名、秘密値名、ロック、HTTP確認先)を表示して承認を記録する。`hook`は承認済みの設定だけを初期化し、未承認では保留して終了コード3を返す。動作規則は[承認と秘密情報](../specs/security.md#approval)を参照する。
 
 制御通信の操作名は`ping`、`run.start`、`run.resume`、`run.stop`、`shutdown`である。`run.start`と`run.resume`は要求元の環境変数を受け取り、子プロセスの継承元と`fromEnv`の参照元に使う。環境変数は状態ストアへ保存しない。状態の表示(`status`・`wait`・`logs`)は状態ストアとログファイルを直接読む。

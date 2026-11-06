@@ -4,3 +4,8 @@ limits:
   layout:
     maxGridDimension: 64
     maxPanesPerTab: 32
+
+# Attemptログの大きさと保持。retentionDaysを省略すると古いログを削除しない。
+logs:
+  maxFileBytes: 20971520
+  generations: 5

@@ -496,3 +496,14 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - TaskRunnerは別プロセスではなくCoordinator内のスレッドとした(ADR-0002はproposedのまま)。Coordinatorの異常終了時は、再起動後の照合で稼働中プロセスを`unknown`として残し、再起動しない。
 - 承認はイベント経路だけに要求し、CLIの明示実行には要求しない判断とした(Q09・Q13に記録)。
 - `cargo fmt`・`clippy -D warnings`・`cargo test --locked`(単体240件、統合8＋3＋7件)が成功。文書検査(通常・移行監査)とprettierも成功。
+
+## 残件の続き(ログペインの追従、ログの保持設定)
+
+- [x] `logs --follow`を再試行のAttemptまで続け、`--keep`でRun終了後もresumeを待つ(ログ・状態pane)
+- [x] プラグイン全体設定`logs`(1ファイル上限、世代数、保持日数)と、Coordinator起動時の古いAttemptファイルの削除
+- [ ] macOSのプロセス識別
+
+### レビュー
+
+- 利用者のshellへ文字列を送ってpaneのコマンドを再実行する方法は採らず、pane側のコマンドが終了しない形にした。既にresume前に終了したpaneには影響しない。
+- `cargo test --locked`(単体252件、統合9＋3＋7件)、clippy、fmtが成功。
