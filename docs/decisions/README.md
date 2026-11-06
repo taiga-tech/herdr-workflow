@@ -17,7 +17,7 @@ updated: '2026-09-16'
 | ID                                                | 判断                           | 状態       |
 | ------------------------------------------------- | ------------------------------ | ---------- |
 | [ADR-0001](0001-rust.md)                          | Rustの採用                     | `accepted` |
-| [ADR-0002](0002-coordinator-runner.md)            | CoordinatorとTaskRunnerの分離  | `proposed` |
+| [ADR-0002](0002-coordinator-runner.md)            | CoordinatorとTaskRunnerの分離  | `accepted` |
 | [ADR-0003](0003-dependency-readiness.md)          | 依存条件とreadinessの分離      | `accepted` |
 | [ADR-0004](0004-owned-resource-reconciliation.md) | 所有権と照合による復旧         | `proposed` |
 | [ADR-0005](0005-configuration-source.md)          | 設定定義と生成スキーマの管理   | `proposed` |

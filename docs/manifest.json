@@ -56,7 +56,7 @@
             "id": "ADR-0002",
             "path": "docs/decisions/0002-coordinator-runner.md",
             "title": "ADR-0002：CoordinatorとTaskRunnerの分離",
-            "status": "proposed",
+            "status": "accepted",
             "sourceSections": []
         },
         {
