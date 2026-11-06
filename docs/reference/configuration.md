@@ -116,16 +116,20 @@ logs:
 
 ### commandタスク
 
-| キー                 | 型                                 | 省略時                    | 制約                                               | 動作規則                                    |
-| -------------------- | ---------------------------------- | ------------------------- | -------------------------------------------------- | ------------------------------------------- |
-| `argv`               | 文字列の配列                       | `script`と排他で一方必須  | 空配列不可                                         | [実行](../specs/execution.md#script)        |
-| `script.shell`       | 文字列の配列                       | 省略不可                  | 空配列不可。値置換を行わない                       | [実行](../specs/execution.md#script)        |
-| `script.source`      | 文字列                             | 省略不可                  | 値置換を行わない                                   | [実行](../specs/execution.md#script)        |
-| `env.<NAME>`         | 文字列、`null`、`{secret: <名前>}` | 起動元の値を継承          | `HERDR_`で始まる名前、空・`=`・NULを含む名前を拒否 | [実行](../specs/execution.md#environment)   |
-| `locks`              | 名前の配列                         | `[]`                      | 名前は`[a-z0-9][a-z0-9-]*`。同じ名前の重複を拒否   | [実行](../specs/execution.md#resource-lock) |
-| `retry`              | map                                | `execution.retries`に従う | `lifecycle: job`だけに指定できる                   | [DAG](../specs/workflow.md#retry)           |
-| `retry.maxAttempts`  | 整数                               | 省略不可                  | `1..=10`。初回を含む総Attempt数                    | [DAG](../specs/workflow.md#retry)           |
-| `retry.delaySeconds` | 整数                               | `0`                       | `0..=3600`                                         | [DAG](../specs/workflow.md#retry)           |
+| キー                                   | 型                                 | 省略時                                  | 制約                                                                 | 動作規則                                                   |
+| -------------------------------------- | ---------------------------------- | --------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `argv`                                 | 文字列の配列                       | `script`・`herdrAction`と排他で一つ必須 | 空配列不可                                                           | [実行](../specs/execution.md#script)                       |
+| `runner`                               | `supervised`・`pty`                | 省略不可                                | `pty`は擬似端末で実行し、`term`で接続する                            | [対話コマンド](../specs/execution.md#interactive)          |
+| `herdrAction.action`                   | 文字列                             | 省略不可                                | `lifecycle: job`かつ`runner: supervised`だけ。`argv`・`script`と排他 | [外部連携](../integrations/external-tools.md#herdr-action) |
+| `herdrAction.plugin`                   | 文字列                             | 呼び出しの応答から得る                  | 実行記録を照会するプラグインID                                       | [外部連携](../integrations/external-tools.md#herdr-action) |
+| `herdrAction.pollIntervalMilliseconds` | 整数                               | `1000`                                  | `100..=60000`                                                        | [外部連携](../integrations/external-tools.md#herdr-action) |
+| `script.shell`                         | 文字列の配列                       | 省略不可                                | 空配列不可。値置換を行わない                                         | [実行](../specs/execution.md#script)                       |
+| `script.source`                        | 文字列                             | 省略不可                                | 値置換を行わない                                                     | [実行](../specs/execution.md#script)                       |
+| `env.<NAME>`                           | 文字列、`null`、`{secret: <名前>}` | 起動元の値を継承                        | `HERDR_`で始まる名前、空・`=`・NULを含む名前を拒否                   | [実行](../specs/execution.md#environment)                  |
+| `locks`                                | 名前の配列                         | `[]`                                    | 名前は`[a-z0-9][a-z0-9-]*`。同じ名前の重複を拒否                     | [実行](../specs/execution.md#resource-lock)                |
+| `retry`                                | map                                | `execution.retries`に従う               | `lifecycle: job`だけに指定できる                                     | [DAG](../specs/workflow.md#retry)                          |
+| `retry.maxAttempts`                    | 整数                               | 省略不可                                | `1..=10`。初回を含む総Attempt数                                      | [DAG](../specs/workflow.md#retry)                          |
+| `retry.delaySeconds`                   | 整数                               | `0`                                     | `0..=3600`                                                           | [DAG](../specs/workflow.md#retry)                          |
 
 `defaults.env`も`env.<NAME>`と同じ値の形式と名前の制約を持つ。`execution.retries`は`retry`を持たないjobの再試行回数(初回を含まない)とし、`maxAttempts = retries + 1`として扱う。範囲は`0..=9`とする。
 
@@ -148,6 +152,19 @@ logs:
 | `http`・`tcp` | `monitor.failureThreshold` | 整数                      | 継続確認なし | `1`以上                                                                    |
 
 `monitor`は省略可能で、指定する場合は二つのキーを両方書く。`log`に`monitor`を書いた場合は拒否する。動作規則は[観測](../specs/observability.md#readiness-config)を参照する。
+
+### profiles
+
+`profiles`はブランチ名で選ぶ構成の差分である。上から順に照合し、最初に一致したものだけを適用する。
+
+| キー                          | 型               | 省略時   | 制約                                                                                             |
+| ----------------------------- | ---------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| `profiles[].id`               | 文字列           | 省略不可 | `[a-z0-9][a-z0-9-]*`。重複不可                                                                   |
+| `profiles[].branch`           | 文字列(パターン) | 省略不可 | `*`は`/`以外の任意の文字列、`**`は`/`を含む任意の文字列、`?`は`/`以外の1文字                     |
+| `profiles[].inputs.<名前>`    | 入力の型の値     | 変更なし | 宣言済みの入力に限る。`worktree.branch`で参照する入力は指定できない。CLIで明示した入力が優先する |
+| `profiles[].bootstrapTargets` | タスクIDの配列   | 変更なし | `bootstrap.targets`を置き換える。存在するタスクに限り、jobであることは適用後の計画で検査する     |
+
+動作規則は[外部連携](../integrations/external-tools.md#profiles)を参照する。
 
 ### worktree.mode: attach
 

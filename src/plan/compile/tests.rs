@@ -101,6 +101,7 @@ fn agent_task_cannot_be_depended_on_with_succeeded() {
             on_dependency_lost: None,
             locks: Vec::new(),
             retry: None,
+            herdr_action: None,
         },
     );
     let err = compile(&spec).expect_err("agent dependency with succeeded should be rejected");

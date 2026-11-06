@@ -218,6 +218,165 @@ fn term_relays_input_to_a_pty_task_and_ends_with_it() {
 }
 
 #[test]
+fn branch_profile_replaces_input_defaults_for_the_checkout_branch() {
+    // Q08: attachしたcheckoutのブランチ名で最初に一致したprofileを使い、計画とRunに記録する。
+    let env = Env::new();
+    let work = env.root.join("work");
+    for args in [
+        &["commit", "-q", "--allow-empty", "-m", "init"][..],
+        &["checkout", "-q", "-b", "docs/guide"][..],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&work)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    let config = env.write_workflow(&job("setup", "echo ${inputs.mode} > ran", ""), "setup");
+    let text = std::fs::read_to_string(&config).unwrap().replace(
+        "name: t\n",
+        "name: t\ninputs:\n  mode:\n    type: string\n    default: full\n",
+    );
+    std::fs::write(
+        &config,
+        format!(
+            "{text}profiles:\n  - id: docs\n    branch: 'docs/**'\n    inputs:\n      mode: light\n"
+        ),
+    )
+    .unwrap();
+    let plan = env.cli(&["plan", "--config", path(&config), "--json"]);
+    // planはcheckoutを受け取らないため、設定のディレクトリ(ここではGitでない)ではprofileを選ばない。
+    assert_eq!(plan.status.code(), Some(0), "{plan:?}");
+    let up = env.cli(&[
+        "attach",
+        "--config",
+        path(&config),
+        "--checkout",
+        path(&work),
+    ]);
+    assert_eq!(up.status.code(), Some(0), "{up:?}");
+    let run_id = String::from_utf8_lossy(&up.stdout).trim().to_string();
+    let wait = env.cli(&[
+        "wait",
+        &run_id,
+        "--until",
+        "finished",
+        "--timeout",
+        "20",
+        "--json",
+    ]);
+    assert_eq!(wait.status.code(), Some(0), "{wait:?}");
+    assert_eq!(
+        std::fs::read_to_string(work.join("ran")).unwrap(),
+        "light\n"
+    );
+    let state = herdr_workflow::runtime::state_dir::StateDir::open(env.state.clone()).unwrap();
+    let store = herdr_workflow::runtime::store::Store::open(&state.db_path()).unwrap();
+    let events: Vec<String> = store
+        .events(&run_id, 0)
+        .unwrap()
+        .into_iter()
+        .map(|(_, _, message)| message)
+        .collect();
+    assert!(
+        events.iter().any(|event| event == "profile: docs"),
+        "{events:?}"
+    );
+    // CLIで明示した入力はprofileの既定値より優先する。
+    let explicit = env.cli(&[
+        "attach",
+        "--config",
+        path(&config),
+        "--checkout",
+        path(&work),
+        "--input",
+        "mode=explicit",
+    ]);
+    let run_id = String::from_utf8_lossy(&explicit.stdout).trim().to_string();
+    let wait = env.cli(&["wait", &run_id, "--until", "finished", "--timeout", "20"]);
+    assert_eq!(wait.status.code(), Some(0), "{wait:?}");
+    assert_eq!(
+        std::fs::read_to_string(work.join("ran")).unwrap(),
+        "explicit\n"
+    );
+}
+
+/// `plugin.action.invoke`と`plugin.log.list`だけに答える偽のHerdr(公開スキーマの応答形)。
+fn fake_herdr_actions(socket: &Path, final_status: &'static str, exit_code: i32) {
+    let _ = std::fs::remove_file(socket);
+    let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader, Write};
+        let mut polls = 0;
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let result = match request["method"].as_str().unwrap() {
+                "plugin.action.invoke" => serde_json::json!({
+                    "type": "plugin_action_invoked", "action": {}, "context": {},
+                    "log": { "log_id": "l1", "plugin_id": "ext", "command": ["x"], "status": "running", "started_unix_ms": 0 }
+                }),
+                _ => {
+                    polls += 1;
+                    let status = if polls < 2 { "running" } else { final_status };
+                    serde_json::json!({ "type": "plugin_log_list", "logs": [
+                        { "log_id": "l1", "plugin_id": "ext", "command": ["x"], "status": status,
+                          "exit_code": exit_code, "stdout": "external setup output", "started_unix_ms": 0 }
+                    ]})
+                }
+            };
+            let response = serde_json::json!({ "id": request["id"], "result": result });
+            let _ = stream.write_all(format!("{response}\n").as_bytes());
+        }
+    });
+}
+
+#[test]
+fn herdr_action_job_waits_for_the_command_log_result() {
+    // Q08: 他プラグインのactionは、呼び出しの応答ではなく実行記録の確定で成否を決める。
+    let env = Env::new();
+    let config = env.write_workflow(
+        "  external:\n    type: command\n    lifecycle: job\n    runner: supervised\n    herdrAction:\n      action: ext.setup\n      pollIntervalMilliseconds: 100\n",
+        "",
+    );
+    let headless = env.cli(&["run", "--config", path(&config), "--target", "external"]);
+    assert_eq!(headless.status.code(), Some(2), "{headless:?}");
+    assert!(String::from_utf8_lossy(&headless.stderr).contains("HERDR_SOCKET_PATH"));
+
+    for (status, code, expected) in [("succeeded", 0, 0), ("failed", 5, 4)] {
+        let socket = env.root.join(format!("h-{status}.sock"));
+        fake_herdr_actions(&socket, status, code);
+        let run = env.cli_with(
+            &[
+                "run",
+                "--config",
+                path(&config),
+                "--target",
+                "external",
+                "--json",
+            ],
+            &[("HERDR_SOCKET_PATH", path(&socket))],
+        );
+        assert_eq!(run.status.code(), Some(expected), "{run:?}");
+        let report: serde_json::Value = serde_json::from_slice(&run.stdout).unwrap();
+        let run_id = report["run"]["runId"].as_str().unwrap();
+        let logs = env.cli(&["logs", run_id, "--task", "external"]);
+        let text = String::from_utf8_lossy(&logs.stdout);
+        assert!(text.contains("invoked Herdr action ext.setup"), "{text}");
+        assert!(text.contains("external setup output"), "{text}");
+    }
+}
+
+#[test]
 fn retry_runs_a_new_attempt_without_repeating_succeeded_tasks() {
     let env = Env::new();
     let config = env.write_workflow(

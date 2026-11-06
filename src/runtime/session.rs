@@ -45,6 +45,10 @@ pub enum SessionError {
     AgentDependency { task: String, dependency: String },
     #[error("checkout {path} is not usable: {message}")]
     Checkout { path: PathBuf, message: String },
+    #[error(
+        "task {0:?} calls a Herdr plugin action; HERDR_SOCKET_PATH is not set (run it inside Herdr)"
+    )]
+    HerdrActionWithoutHerdr(String),
 }
 
 /// 秘密値定義の読み込み口。
@@ -218,6 +222,15 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
             id.clone(),
             prepare::prepare_task(request.spec, id, &resolved_values, &checkout)?,
         );
+    }
+    // Herdrのactionを呼ぶjobは、外部操作の前にHerdrの接続先があることを確かめる。
+    if let Some((id, _)) = tasks.iter().find(|(_, task)| task.herdr_action.is_some())
+        && request
+            .base_env
+            .get(&OsString::from("HERDR_SOCKET_PATH"))
+            .is_none_or(|path| path.is_empty())
+    {
+        return Err(SessionError::HerdrActionWithoutHerdr(id.0.clone()));
     }
 
     // Run開始時に、参照した秘密値がすべて定義済みであることを外部操作の前に確認する。

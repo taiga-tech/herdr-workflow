@@ -1147,6 +1147,25 @@ fn doctor_main(state: &StateDir, args: &Args) -> i32 {
         }),
         false,
     ));
+    // 同じworktreeイベントに反応する他のプラグインがあれば、初期化の二重実行を警告する(Q08)。
+    let env: BTreeMap<String, String> = coordinator::current_env();
+    if let Ok(mut client) = crate::herdr::HerdrClient::from_env(&env) {
+        let (ok, detail) = match crate::herdr::competing_plugins(&mut client) {
+            Ok(found) if found.is_empty() => (
+                true,
+                "no other plugin reacts to worktree events".to_string(),
+            ),
+            Ok(found) => (
+                false,
+                format!(
+                    "also reacting to worktree events (initialization may run twice): {}",
+                    found.join(", ")
+                ),
+            ),
+            Err(error) => (false, format!("plugin.list failed: {error}")),
+        };
+        checks.push(("herdr-plugins".to_string(), ok, detail, false));
+    }
     let coordinator = Client::connect(state)
         .and_then(|mut client| client.call("ping", json!({})))
         .map(|value| format!("running (pid {})", value["pid"]))

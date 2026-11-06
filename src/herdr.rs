@@ -328,6 +328,38 @@ pub fn report_metadata(
     Ok(())
 }
 
+/// 本プラグインのID(`herdr-plugin.toml`の`id`)。
+pub const PLUGIN_ID: &str = "herdr-workflow";
+
+/// 同じworktreeイベントに反応する、有効な他のプラグイン(`plugin.list`、Q08)。
+/// 初期化が二重に行われうるため警告に使う。利用者のプラグインを無効化はしない。
+pub fn competing_plugins(client: &mut HerdrClient) -> Result<Vec<String>, HerdrError> {
+    let listed = client.request("plugin.list", json!({}))?;
+    let own = std::env::var("HERDR_PLUGIN_ID").unwrap_or_else(|_| PLUGIN_ID.to_string());
+    Ok(listed["plugins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|plugin| plugin["enabled"].as_bool() == Some(true))
+        .filter(|plugin| plugin["plugin_id"].as_str() != Some(own.as_str()))
+        .filter_map(|plugin| {
+            let events: Vec<&str> = plugin["events"]
+                .as_array()?
+                .iter()
+                .filter_map(|event| event["on"].as_str())
+                .filter(|on| matches!(*on, "worktree.created" | "worktree.opened"))
+                .collect();
+            (!events.is_empty()).then(|| {
+                format!(
+                    "{} ({})",
+                    plugin["plugin_id"].as_str().unwrap_or("?"),
+                    events.join(", ")
+                )
+            })
+        })
+        .collect())
+}
+
 /// サイドバーに表示できるworkspaceのtoken(Q03)。利用者がHerdrのSpace行に`$flow_state`等を
 /// 書くと表示される。Herdrの規則(名前は1〜32文字、値は80文字まで)に収まる値だけを返す。
 #[must_use]
@@ -408,6 +440,10 @@ pub(crate) mod fake {
         pub agent_statuses: Arc<Mutex<std::collections::VecDeque<String>>>,
         /// `pane.get`で`not_found`を返すpane ID。
         pub missing_panes: Arc<Mutex<Vec<String>>>,
+        /// `plugin.log.list`へ順に返す実行記録の状態。尽きたら`running`。
+        pub plugin_logs: Arc<Mutex<std::collections::VecDeque<Value>>>,
+        /// `plugin.list`へ返すプラグイン。
+        pub plugins: Arc<Mutex<Vec<Value>>>,
     }
 
     fn pane_ids(node: &Value, next: &mut u32) -> Value {
@@ -435,6 +471,10 @@ pub(crate) mod fake {
             let statuses = Arc::clone(&agent_statuses);
             let missing_panes = Arc::new(Mutex::new(Vec::new()));
             let missing = Arc::clone(&missing_panes);
+            let plugin_logs = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+            let logs = Arc::clone(&plugin_logs);
+            let plugins = Arc::new(Mutex::new(Vec::new()));
+            let installed = Arc::clone(&plugins);
             std::thread::spawn(move || {
                 use std::io::{BufRead, BufReader, Write};
                 let mut next = 0;
@@ -485,6 +525,24 @@ pub(crate) mod fake {
                         "agent.start" => {
                             json!({ "type": "agent_started", "agent": { "pane_id": request["params"]["pane_id"] }, "argv": ["claude"] })
                         }
+                        "plugin.action.invoke" => json!({
+                            "type": "plugin_action_invoked",
+                            "action": { "action_id": request["params"]["action_id"] },
+                            "context": {},
+                            "log": { "log_id": "log1", "plugin_id": request["params"]["plugin_id"], "command": ["setup"], "status": "running", "started_unix_ms": 0 }
+                        }),
+                        "plugin.log.list" => {
+                            let mut record = logs
+                                .lock()
+                                .unwrap()
+                                .pop_front()
+                                .unwrap_or_else(|| json!({ "status": "running" }));
+                            record["log_id"] = json!("log1");
+                            json!({ "type": "plugin_log_list", "logs": [record] })
+                        }
+                        "plugin.list" => {
+                            json!({ "type": "plugin_list", "plugins": installed.lock().unwrap().clone() })
+                        }
                         _ => json!({ "type": "ok" }),
                     };
                     let response = json!({ "id": request["id"], "result": result });
@@ -496,6 +554,8 @@ pub(crate) mod fake {
                 requests,
                 agent_statuses,
                 missing_panes,
+                plugin_logs,
+                plugins,
             }
         }
 
@@ -515,6 +575,23 @@ mod tests {
     use super::fake::FakeHerdr;
     use super::*;
     use crate::runtime::state_dir::test_support::TempDir;
+
+    #[test]
+    fn plugins_reacting_to_the_same_worktree_events_are_listed() {
+        let tmp = TempDir::new("herdr");
+        let fake = FakeHerdr::start(tmp.0.join("h.sock"), tmp.0.join("wt"));
+        fake.plugins.lock().unwrap().extend([
+            json!({ "plugin_id": "herdr-workflow", "enabled": true, "events": [{ "on": "worktree.created", "command": ["x"] }] }),
+            json!({ "plugin_id": "other.bootstrap", "enabled": true, "events": [{ "on": "worktree.created", "command": ["x"] }] }),
+            json!({ "plugin_id": "disabled.one", "enabled": false, "events": [{ "on": "worktree.created", "command": ["x"] }] }),
+            json!({ "plugin_id": "unrelated", "enabled": true, "events": [{ "on": "pane.created", "command": ["x"] }] }),
+        ]);
+        let mut client = HerdrClient::new(fake.path.clone());
+        assert_eq!(
+            competing_plugins(&mut client).unwrap(),
+            ["other.bootstrap (worktree.created)"]
+        );
+    }
 
     #[test]
     fn sidebar_tokens_summarize_the_run() {

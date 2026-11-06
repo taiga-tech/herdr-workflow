@@ -77,8 +77,11 @@ pub enum ValidateError {
     #[error("tasks.{task:?}: argv and script cannot be specified together")]
     ArgvScriptConflict { task: TaskId },
 
-    #[error("tasks.{task:?}: either argv or script is required")]
+    #[error("tasks.{task:?}: one of argv, script or herdrAction is required")]
     MissingCommand { task: TaskId },
+
+    #[error("tasks.{task:?}.herdrAction: {message}")]
+    InvalidHerdrAction { task: TaskId, message: String },
 
     #[error("tasks.{task:?}.{field}: must not be empty")]
     EmptyCommand { task: TaskId, field: &'static str },
@@ -124,6 +127,9 @@ pub enum ValidateError {
 
     #[error("tasks.{task:?}.waitFor.pattern: invalid regular expression: {message}")]
     InvalidLogPattern { task: TaskId, message: String },
+
+    #[error("profiles[{index}]: {message}")]
+    InvalidProfile { index: usize, message: String },
 }
 
 /// `execution.retries`の上限。`retry.maxAttempts`の上限10から初回分を引いた値。
@@ -147,6 +153,77 @@ pub fn validate(spec: &WorkflowSpec) -> Result<(), ValidateError> {
     validate_execution_limits(spec)?;
     validate_worktree(spec)?;
     validate_tasks(spec)?;
+    validate_profiles(spec)?;
+    Ok(())
+}
+
+/// profileの意味検証。適用後の構成は`compile`で改めて検証する。
+fn validate_profiles(spec: &WorkflowSpec) -> Result<(), ValidateError> {
+    let branch_inputs: Vec<String> = spec
+        .worktree
+        .branch
+        .as_deref()
+        .map(|branch| {
+            branch
+                .split("${inputs.")
+                .skip(1)
+                .filter_map(|rest| rest.split('}').next())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut ids = std::collections::BTreeSet::new();
+    for (index, profile) in spec.profiles.iter().enumerate() {
+        let invalid = |message: String| ValidateError::InvalidProfile { index, message };
+        if !is_valid_resource_name(&profile.id) {
+            return Err(invalid(format!("id {:?} is not a valid name", profile.id)));
+        }
+        if !ids.insert(profile.id.as_str()) {
+            return Err(invalid(format!("id {:?} is duplicated", profile.id)));
+        }
+        if profile.branch.trim().is_empty() {
+            return Err(invalid("branch pattern must not be empty".to_string()));
+        }
+        for (input, value) in &profile.inputs {
+            let Some(def) = spec.inputs.get(input) else {
+                return Err(invalid(format!("input {:?} is not declared", input.0)));
+            };
+            let matches = matches!(
+                (def.input_type, value),
+                (
+                    InputType::String,
+                    crate::config::model::InputDefault::String(_)
+                ) | (
+                    InputType::Integer,
+                    crate::config::model::InputDefault::Integer(_)
+                ) | (
+                    InputType::Boolean,
+                    crate::config::model::InputDefault::Boolean(_)
+                )
+            );
+            if !matches {
+                return Err(invalid(format!(
+                    "input {:?} must be a {:?} value",
+                    input.0, def.input_type
+                )));
+            }
+            // ブランチ名で選んだ結果がブランチ名を変えると循環するため、許可しない。
+            if branch_inputs.iter().any(|name| name == &input.0) {
+                return Err(invalid(format!(
+                    "input {:?} is used by worktree.branch and cannot be set by a profile",
+                    input.0
+                )));
+            }
+        }
+        for target in profile.bootstrap_targets.iter().flatten() {
+            if !spec.tasks.contains_key(target) {
+                return Err(invalid(format!(
+                    "bootstrapTargets: task {:?} does not exist",
+                    target.0
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -228,12 +305,39 @@ fn validate_tasks(spec: &WorkflowSpec) -> Result<(), ValidateError> {
             wait_for,
             locks,
             retry,
+            herdr_action,
+            runner,
             ..
         } = def
         else {
             continue;
         };
+        if let Some(action) = herdr_action {
+            let invalid = |message: &str| ValidateError::InvalidHerdrAction {
+                task: task_id.clone(),
+                message: message.to_string(),
+            };
+            if argv.is_some() || script.is_some() {
+                return Err(invalid("cannot be combined with argv or script"));
+            }
+            if *lifecycle != crate::config::model::TaskLifecycle::Job
+                || *runner != crate::config::model::RunnerKind::Supervised
+            {
+                return Err(invalid(
+                    "only job-lifecycle tasks with runner: supervised can call an action",
+                ));
+            }
+            if action.action.trim().is_empty() {
+                return Err(invalid("action must not be empty"));
+            }
+            if !(100..=60_000).contains(&action.poll_interval_milliseconds) {
+                return Err(invalid(
+                    "pollIntervalMilliseconds must be between 100 and 60000",
+                ));
+            }
+        }
         match (argv, script) {
+            (None, None) if herdr_action.is_some() => {}
             (Some(_), Some(_)) => {
                 return Err(ValidateError::ArgvScriptConflict {
                     task: task_id.clone(),

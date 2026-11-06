@@ -562,6 +562,9 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
         .iter()
         .map(|(key, value)| (InputId(key.clone()), value.clone()))
         .collect();
+    // ブランチ名で選んだprofileを適用した構成で計画する(Q08)。
+    let (spec, profile) =
+        crate::config::profile::resolve(&spec, &inputs, Some(&start.record.checkout));
     let mut start = start;
     let mut workspace_id = start
         .env
@@ -735,6 +738,9 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             })?;
     }
     let _ = store.add_event(&record.run_id, "accepted");
+    if let Some(profile) = &profile {
+        let _ = store.add_event(&record.run_id, &format!("profile: {profile}"));
+    }
 
     let (control_tx, control_rx) = mpsc::channel();
     let run_id = record.run_id.clone();

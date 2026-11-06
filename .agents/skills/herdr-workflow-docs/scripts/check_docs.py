@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[4]
-CURRENT_ACCEPTANCE_TEST_MAX = 43
+CURRENT_ACCEPTANCE_TEST_MAX = 46
 MIGRATION_ACCEPTANCE_TEST_MAX = 32
 
 

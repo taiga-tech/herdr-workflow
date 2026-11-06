@@ -97,12 +97,17 @@ pub struct PreparedTask {
     pub on_dependency_lost: OnDependencyLost,
     /// `runner: pty`(擬似端末で実行する)。
     pub pty: bool,
+    /// `herdrAction`で呼び出すaction ID(表示用)。
+    pub herdr_action: Option<String>,
 }
 
 impl PreparedTask {
     /// 表示用のコマンド概要。秘密値は含まない(環境変数は表示しない)。
     #[must_use]
     pub fn command_summary(&self) -> String {
+        if let Some(action) = &self.herdr_action {
+            return format!("herdr action {action}");
+        }
         std::iter::once(self.program.as_str())
             .chain(self.args.iter().map(String::as_str))
             .collect::<Vec<_>>()
@@ -210,13 +215,27 @@ pub fn prepare_task(
         locks,
         retry,
         runner,
+        herdr_action,
         ..
     }) = spec.tasks.get(id)
     else {
         return Err(PrepareError::NotCommand(id.clone()));
     };
     let task = id.0.as_str();
-    let (program, args) = if let Some(argv) = argv {
+    let (program, args) = if let Some(action) = herdr_action {
+        // 自分自身を`herdr-action`として起動し、actionの完了まで待つjobにする。
+        let exe = std::env::var_os("HERDR_WORKFLOW_BIN")
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_exe().ok())
+            .unwrap_or_else(|| PathBuf::from("herdr-workflow"));
+        (
+            exe.display().to_string(),
+            vec![
+                "herdr-action".to_string(),
+                serde_json::to_string(action).unwrap_or_default(),
+            ],
+        )
+    } else if let Some(argv) = argv {
         let mut resolved_argv = Vec::with_capacity(argv.len());
         for index in 0..argv.len() {
             resolved_argv.push(values.get(&format!("tasks.{task}.argv.{index}"))?);
@@ -359,6 +378,7 @@ pub fn prepare_task(
         depends_on: depends_on.clone(),
         on_dependency_lost: on_dependency_lost.unwrap_or(OnDependencyLost::Stop),
         pty: *runner == crate::config::model::RunnerKind::Pty,
+        herdr_action: herdr_action.as_ref().map(|action| action.action.clone()),
     })
 }
 

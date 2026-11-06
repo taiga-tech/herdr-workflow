@@ -59,6 +59,13 @@
         "name": {
             "type": "string"
         },
+        "profiles": {
+            "description": "ブランチ名で選ぶ構成(docs/integrations/external-tools.md#profiles)。最初に一致したものを使う。",
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/ProfileDef"
+            }
+        },
         "tasks": {
             "type": "object",
             "additionalProperties": {
@@ -276,6 +283,29 @@
         "FilesSource": {
             "type": "string",
             "enum": ["primary"]
+        },
+        "HerdrActionSpec": {
+            "description": "Herdrプラグインのactionの呼び出し(Q08、docs/integrations/external-tools.md#herdr-action)。",
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "`plugin.action.invoke`の`action_id`。",
+                    "type": "string"
+                },
+                "plugin": {
+                    "description": "実行記録を照会するプラグインID。省略時は呼び出しの応答から得る。",
+                    "type": ["string", "null"]
+                },
+                "pollIntervalMilliseconds": {
+                    "description": "実行記録の照会間隔(100〜60000ミリ秒)。",
+                    "type": "integer",
+                    "format": "uint64",
+                    "default": 1000,
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false,
+            "required": ["action"]
         },
         "IfExistsPolicy": {
             "type": "string",
@@ -524,6 +554,37 @@
             "type": "string",
             "enum": ["stop-owned"]
         },
+        "ProfileDef": {
+            "description": "ブランチ名に一致したときに適用する構成の差分。",
+            "type": "object",
+            "properties": {
+                "bootstrapTargets": {
+                    "description": "`bootstrap.targets`を置き換える。",
+                    "type": ["array", "null"],
+                    "default": null,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "branch": {
+                    "description": "ブランチ名のパターン。`*`は`/`以外の任意の文字列、`**`は`/`を含む任意の文字列、\n`?`は`/`以外の1文字に一致する。",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "description": "入力の既定値を置き換える。CLIで明示した入力が優先する。",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/InputDefault"
+                    },
+                    "default": {}
+                }
+            },
+            "additionalProperties": false,
+            "required": ["id", "branch"]
+        },
         "RetryConfig": {
             "type": "object",
             "properties": {
@@ -648,6 +709,17 @@
                                 "$ref": "#/$defs/EnvValue"
                             },
                             "default": {}
+                        },
+                        "herdrAction": {
+                            "description": "他のHerdrプラグインのactionを実行し、その完了を待つ(`argv`・`script`と排他、jobのみ)。",
+                            "anyOf": [
+                                {
+                                    "$ref": "#/$defs/HerdrActionSpec"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
                         },
                         "lifecycle": {
                             "$ref": "#/$defs/TaskLifecycle"

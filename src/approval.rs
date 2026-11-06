@@ -56,6 +56,22 @@ pub fn summary(spec: &WorkflowSpec) -> String {
             );
         }
     }
+    for profile in &spec.profiles {
+        let _ = writeln!(
+            out,
+            "profile {}: branch {} (bootstrap: {})",
+            profile.id,
+            profile.branch,
+            profile.bootstrap_targets.as_ref().map_or_else(
+                || "unchanged".to_string(),
+                |targets| targets
+                    .iter()
+                    .map(|t| t.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        );
+    }
     for (id, task) in &spec.tasks {
         match task {
             TaskDef::Command {
@@ -64,9 +80,16 @@ pub fn summary(spec: &WorkflowSpec) -> String {
                 env,
                 locks,
                 wait_for,
+                herdr_action,
                 ..
             } => {
                 let command = match (argv, script) {
+                    _ if herdr_action.is_some() => format!(
+                        "Herdr plugin action {} (runs another plugin's command)",
+                        herdr_action
+                            .as_ref()
+                            .map_or("", |action| action.action.as_str())
+                    ),
                     (Some(argv), _) => argv.join(" "),
                     (None, Some(script)) => {
                         format!("{} <<script>>\n{}", script.shell.join(" "), script.source)

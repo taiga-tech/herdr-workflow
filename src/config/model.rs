@@ -102,6 +102,25 @@ pub struct WorkflowSpec {
     pub execution: ExecutionConfig,
     #[serde(default)]
     pub cleanup: Option<CleanupConfig>,
+    /// ブランチ名で選ぶ構成(docs/integrations/external-tools.md#profiles)。最初に一致したものを使う。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<ProfileDef>,
+}
+
+/// ブランチ名に一致したときに適用する構成の差分。
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProfileDef {
+    pub id: String,
+    /// ブランチ名のパターン。`*`は`/`以外の任意の文字列、`**`は`/`を含む任意の文字列、
+    /// `?`は`/`以外の1文字に一致する。
+    pub branch: String,
+    /// 入力の既定値を置き換える。CLIで明示した入力が優先する。
+    #[serde(default, deserialize_with = "no_duplicate_map")]
+    pub inputs: BTreeMap<InputId, InputDefault>,
+    /// `bootstrap.targets`を置き換える。
+    #[serde(default)]
+    pub bootstrap_targets: Option<Vec<TaskId>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
@@ -264,6 +283,9 @@ pub enum TaskDef {
         locks: Vec<LockName>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retry: Option<RetryConfig>,
+        /// 他のHerdrプラグインのactionを実行し、その完了を待つ(`argv`・`script`と排他、jobのみ)。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        herdr_action: Option<Box<HerdrActionSpec>>,
     },
     #[serde(rename_all = "camelCase")]
     Agent {
@@ -271,6 +293,26 @@ pub enum TaskDef {
         #[serde(default)]
         depends_on: Vec<DependsOn>,
     },
+}
+
+/// Herdrプラグインのactionの呼び出し(Q08、docs/integrations/external-tools.md#herdr-action)。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HerdrActionSpec {
+    /// `plugin.action.invoke`の`action_id`。
+    pub action: String,
+    /// 実行記録を照会するプラグインID。省略時は呼び出しの応答から得る。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// 実行記録の照会間隔(100〜60000ミリ秒)。
+    #[serde(default = "HerdrActionSpec::default_poll")]
+    pub poll_interval_milliseconds: u64,
+}
+
+impl HerdrActionSpec {
+    const fn default_poll() -> u64 {
+        1000
+    }
 }
 
 /// シェル経由で実行する本文。`shell`の末尾に`source`を一つの引数として追加して起動する。

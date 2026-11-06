@@ -6,6 +6,10 @@ fn main() {
     if args.first().map(String::as_str) == Some("runner") {
         std::process::exit(herdr_workflow::runtime::runner::main());
     }
+    // `herdrAction`のjob(Q08)。
+    if args.first().map(String::as_str) == Some("herdr-action") {
+        std::process::exit(herdr_workflow::herdr_action::main(&args[1..]));
+    }
     if args
         .first()
         .is_some_and(|subcommand| commands::handles(subcommand))
