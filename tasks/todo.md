@@ -501,9 +501,10 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 
 - [x] `logs --follow`を再試行のAttemptまで続け、`--keep`でRun終了後もresumeを待つ(ログ・状態pane)
 - [x] プラグイン全体設定`logs`(1ファイル上限、世代数、保持日数)と、Coordinator起動時の古いAttemptファイルの削除
-- [ ] macOSのプロセス識別
+- [x] macOSのプロセス識別(`proc_pidinfo`・`kern.boottime`・`proc_listallpids`)。darwin向けのコンパイル検査のみ
 
 ### レビュー
 
 - 利用者のshellへ文字列を送ってpaneのコマンドを再実行する方法は採らず、pane側のコマンドが終了しない形にした。既にresume前に終了したpaneには影響しない。
 - `cargo test --locked`(単体252件、統合9＋3＋7件)、clippy、fmtが成功。
+- macOS用の処理は`src/runtime/process_macos.rs`へ分け、`std`と`libc`だけに依存させた。このファイルとCoordinatorの`getpeereid`呼び出しを、検査用クレートでx86_64・aarch64のdarwin向けに`clippy -D warnings`で検査した。クレート全体はmacOS SDKがないためSQLiteのC部分を組み立てられず、darwin向けに検査していない。

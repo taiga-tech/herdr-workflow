@@ -108,7 +108,7 @@ TaskRunnerは子プロセスを新しいプロセスグループの先頭とし�
 | PIDは存在するが起動時刻またはグループが異なる | 不在      | PID再利用とみなし、そのPIDへ信号を送らない |
 | OS情報を取得できない、記録が欠けている        | `unknown` | 自動で再起動・停止しない                   |
 
-現在の実装はLinuxの`/proc`だけから起動時刻とブート識別子を取得する。macOSの`sysctl`による取得は未実装で、macOSでは照合結果が`unknown`になり、自動で再起動・停止しない。
+LinuxではPIDの起動時刻と状態を`/proc/<pid>/stat`、ブート識別子を`/proc/sys/kernel/random/boot_id`から取得する。macOSでは起動時刻・親PID・状態を`proc_pidinfo(PROC_PIDTBSDINFO)`、ブートの識別を`sysctl kern.boottime`から取得する。macOS版はdarwin向けのコンパイル検査だけを行っており、macOS実機では試験していない。
 
 停止はプロセスグループへ信号を送り、記録したグループIDと現在の値が一致する場合に限る。グループ外へ移った子孫プロセスの扱いは[後片付け](cleanup.md)で定める。
 
