@@ -75,7 +75,8 @@ herdr-workflow/
 │   │   ├── store.rs                SQLiteの状態ストア
 │   │   ├── git.rs                  Git CLIによるcheckoutの照合
 │   │   ├── files.rs                files.copyの検査・実行・復旧
-│   │   └── fingerprint.rs          再開前に比べるcheckoutの記録
+│   │   ├── fingerprint.rs          再開前に比べるcheckoutの記録
+│   │   └── tty.rs                  対話コマンドの擬似端末と端末クライアント
 │   └── state/
 │       └── models.rs               TaskState、AttemptResult等
 ├── tests/

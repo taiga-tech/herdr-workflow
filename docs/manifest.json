@@ -95,6 +95,13 @@
             "sourceSections": []
         },
         {
+            "id": "ADR-0008",
+            "path": "docs/decisions/0008-pty-runner.md",
+            "title": "ADR-0008：対話コマンドの擬似端末をTaskRunnerが持つ",
+            "status": "accepted",
+            "sourceSections": []
+        },
+        {
             "id": "ADR-INDEX",
             "path": "docs/decisions/README.md",
             "title": "設計判断の記録",

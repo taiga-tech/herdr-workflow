@@ -53,15 +53,15 @@ updated: '2026-11-05'
 
 ## 後続・保留の機能
 
-| ID                  | 機能                           | 状態                                  | 参照先                                     |
-| ------------------- | ------------------------------ | ------------------------------------- | ------------------------------------------ |
-| <a id="f12"></a>F12 | 対話Runner                     | 段階E、PTY契約と試験は未確定          | [実行](specs/execution.md)                 |
-| <a id="f13"></a>F13 | 外部プラグインのアダプター     | 段階E、処理完了を観測できる連携に限定 | [外部連携](integrations/external-tools.md) |
-| <a id="f14"></a>F14 | branch別profile                | 段階E、設定形式は未確定               | [外部連携](integrations/external-tools.md) |
-| <a id="f15"></a>F15 | Windowsネイティブ              | 段階E、WSL対応とは別に検証            | [開発・配布](guides/development.md)        |
-| <a id="f16"></a>F16 | 複数worktreeの親DAG            | 初期版対象外、時期未定                | [未決事項](planning/open-questions.md#q06) |
-| <a id="f17"></a>F17 | Run間キャッシュ                | 初期版では提供しない                  | [未決事項](planning/open-questions.md#q07) |
-| <a id="f18"></a>F18 | ネイティブサイドバーのTask一覧 | 公開APIでの実現可否は未確認           | [Herdr連携](integrations/herdr.md)         |
+| ID                  | 機能                           | 状態                                                                                                                                                                                                                                                 | 参照先                                     |
+| ------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| <a id="f12"></a>F12 | 対話Runner                     | `runner: pty`と`term`を実装([ADR-0008](decisions/0008-pty-runner.md))。[T40](testing/acceptance.md#t40)、[T41](testing/acceptance.md#t41)、[T42](testing/acceptance.md#t42)、[T43](testing/acceptance.md#t43)をLinuxで確認。macOSとHerdr実機は未試験 | [実行](specs/execution.md)                 |
+| <a id="f13"></a>F13 | 外部プラグインのアダプター     | 段階E、処理完了を観測できる連携に限定                                                                                                                                                                                                                | [外部連携](integrations/external-tools.md) |
+| <a id="f14"></a>F14 | branch別profile                | 段階E、設定形式は未確定                                                                                                                                                                                                                              | [外部連携](integrations/external-tools.md) |
+| <a id="f15"></a>F15 | Windowsネイティブ              | 段階E、WSL対応とは別に検証                                                                                                                                                                                                                           | [開発・配布](guides/development.md)        |
+| <a id="f16"></a>F16 | 複数worktreeの親DAG            | 初期版対象外、時期未定                                                                                                                                                                                                                               | [未決事項](planning/open-questions.md#q06) |
+| <a id="f17"></a>F17 | Run間キャッシュ                | 初期版では提供しない                                                                                                                                                                                                                                 | [未決事項](planning/open-questions.md#q07) |
+| <a id="f18"></a>F18 | ネイティブサイドバーのTask一覧 | 提供しない。v0.9.5の公開APIに区画追加の手段がなく、集計値をtokenで報告する                                                                                                                                                                           | [Herdr連携](integrations/herdr.md)         |
 
 後続機能の受け入れ試験はQ14で管理する。既存のT01〜T39だけでこれらの対応完了を判断しない。
 

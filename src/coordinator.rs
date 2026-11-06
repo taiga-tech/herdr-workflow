@@ -140,7 +140,7 @@ pub fn check_socket_path(path: &Path) -> Result<(), CoordinatorError> {
 
 /// 接続相手の利用者ID。
 #[cfg(target_os = "linux")]
-fn peer_uid(stream: &UnixStream) -> Option<u32> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Option<u32> {
     let mut cred = libc::ucred {
         pid: 0,
         uid: 0,
@@ -161,7 +161,7 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn peer_uid(stream: &UnixStream) -> Option<u32> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Option<u32> {
     let mut uid: libc::uid_t = 0;
     let mut gid: libc::gid_t = 0;
     // SAFETY: uid・gidは出力領域。
@@ -371,6 +371,10 @@ fn layout_hook(
                         Some(command)
                     };
                     let command = match &pane.view {
+                        // 対話タスクは端末として接続し、それ以外はログを追う(ADR-0008)。
+                        PaneView::Logs { task } if is_pty_task(&spec, task) => {
+                            follow(&["term", &run_id, "--task", &task.0, "--keep"])
+                        }
                         PaneView::Logs { task } => {
                             follow(&["logs", &run_id, "--task", &task.0, "--follow", "--keep"])
                         }
@@ -489,6 +493,16 @@ fn layout_hook(
             agents: results,
         })
     })
+}
+
+fn is_pty_task(spec: &crate::config::model::WorkflowSpec, task: &TaskId) -> bool {
+    matches!(
+        spec.tasks.get(task),
+        Some(crate::config::model::TaskDef::Command {
+            runner: crate::config::model::RunnerKind::Pty,
+            ..
+        })
+    )
 }
 
 /// `RunRequest`の材料(借用の寿命を呼び出し側に揃えるため所有値で持つ)。
@@ -2252,6 +2266,7 @@ mod tests {
         state.ensure_subdir(&dir).unwrap();
         // 既に終了したプロセスの起動証跡と、TaskRunnerが確定した結果。
         let launch = engine::LaunchFile {
+            tty: None,
             run_id: "r".to_string(),
             task_id: "migrate".to_string(),
             attempt_id: 1,

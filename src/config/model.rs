@@ -323,8 +323,10 @@ pub enum TaskLifecycle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum RunnerKind {
+    /// 標準出力と標準エラーをパイプで受ける非対話の実行。
     Supervised,
-    // "pane" 等の対話Runnerは docs/planning/roadmap.md 段階Eの範囲。
+    /// 擬似端末で実行し、`herdr-workflow term`から操作する対話の実行(ADR-0008)。
+    Pty,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]

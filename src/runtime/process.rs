@@ -389,6 +389,51 @@ pub fn spawn(spec: &LaunchSpec) -> io::Result<Spawned> {
     })
 }
 
+/// 擬似端末を制御端末として起動したプロセス(`runner: pty`、ADR-0008)。
+pub struct PtySpawned {
+    pub identity: ProcessIdentity,
+    pub handle: ProcessHandle,
+    pub waiter: Waiter,
+}
+
+/// 新しいセッションで起動し、`slave`を標準入出力と制御端末にする。
+/// セッションの先頭なのでプロセスグループIDはPIDと同じになり、停止は通常と同じく
+/// グループへ送る。
+pub fn spawn_pty(spec: &LaunchSpec, slave: &std::os::fd::OwnedFd) -> io::Result<PtySpawned> {
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .current_dir(&spec.cwd)
+        .env_clear()
+        .envs(&spec.env)
+        .stdin(Stdio::from(slave.try_clone()?))
+        .stdout(Stdio::from(slave.try_clone()?))
+        .stderr(Stdio::from(slave.try_clone()?));
+    // SAFETY: fork後の子プロセスでsetsidとioctlだけを呼ぶ。
+    unsafe {
+        command.pre_exec(|| crate::runtime::tty::make_controlling_terminal());
+    }
+    let child = command.spawn()?;
+    // 子に渡した複製を閉じる(子の終了後に擬似端末の読み出しが終わるように)。
+    drop(command);
+    let pid = child.id();
+    let identity = observe(pid).unwrap_or(ProcessIdentity {
+        pid,
+        start_time: None,
+        pgid: None,
+        boot_id: read_boot_id(),
+    });
+    let reaped = Arc::new(Mutex::new(false));
+    Ok(PtySpawned {
+        identity,
+        handle: ProcessHandle {
+            pid,
+            reaped: Arc::clone(&reaped),
+        },
+        waiter: Waiter { child, reaped },
+    })
+}
+
 /// 終了状態の表現(`AttemptOutcome`へ写す前の値)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Exit {

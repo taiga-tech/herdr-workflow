@@ -1045,7 +1045,21 @@ impl<'r> Engine<'r> {
             log_max_bytes: self.config.log_max_bytes,
             log_generations: self.config.log_generations,
             command_summary: prepared.command_summary(),
+            tty_socket: None,
         };
+        let mut request = request;
+        if prepared.pty {
+            match crate::runtime::tty::socket_path(self.state_dir.root(), &request.attempt_dir) {
+                Some(socket) => request.tty_socket = Some(socket),
+                None => {
+                    self.fail_launch(
+                        id,
+                        "state directory path is too long for a terminal socket".to_string(),
+                    );
+                    return;
+                }
+            }
+        }
         // TaskRunnerを起動し、子プロセスの起動結果を待つ(ADR-0002)。
         let mut connection = match self.config.runner.start(&request) {
             Ok(connection) => connection,

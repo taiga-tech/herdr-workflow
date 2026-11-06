@@ -23,6 +23,7 @@ updated: '2026-09-16'
 | [ADR-0005](0005-configuration-source.md)          | 設定定義と生成スキーマの管理   | `proposed` |
 | [ADR-0006](0006-plugin-config.md)                 | 利用者固有のプラグイン全体設定 | `accepted` |
 | [ADR-0007](0007-state-directory-ipc.md)           | 状態ディレクトリと制御通信     | `accepted` |
+| [ADR-0008](0008-pty-runner.md)                    | 対話コマンドの擬似端末         | `accepted` |
 
 ## 新しい判断の記録
 

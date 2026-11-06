@@ -36,6 +36,7 @@ const SUBCOMMANDS: &[&str] = &[
     "attach",
     "wait",
     "status",
+    "term",
     "logs",
     "stop",
     "resume",
@@ -182,6 +183,7 @@ pub fn main(args: &[String]) -> i32 {
         "wait" => wait_main(&state, &parsed),
         "status" => status_main(&state, &parsed),
         "logs" => logs_main(&state, &parsed),
+        "term" => term_main(&state, &parsed),
         "stop" => stop_main(&state, &parsed),
         "resume" => resume_main(&state, &parsed, None),
         "retry" => {
@@ -969,6 +971,116 @@ fn logs_main(state: &StateDir, args: &Args) -> i32 {
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// `runner: pty`のタスクへ端末として接続する(ADR-0008)。Ctrl+]で切り離し、子プロセスは止めない。
+/// `--keep`ではAttemptの終了後も次のAttemptを待って接続し直す。
+fn term_main(state: &StateDir, args: &Args) -> i32 {
+    let (Some(run_id), Some(task)) = (args.positional.first(), args.task.as_ref()) else {
+        eprint_error(args.json, "cli", "usage: term RUN --task TASK [--keep]");
+        return EXIT_CONFIG;
+    };
+    let store = match Store::open(&state.db_path()) {
+        Ok(store) => store,
+        Err(error) => {
+            eprint_error(args.json, "store", &error.to_string());
+            return EXIT_CONNECTION;
+        }
+    };
+    let mut attached: Option<u32> = None;
+    let mut announced = false;
+    loop {
+        let tasks = store.tasks(run_id).unwrap_or_default();
+        let Some(snapshot) = tasks.get(&TaskId(task.clone())) else {
+            // 開始直後はまだタスクの状態が保存されていない。
+            if store.run(run_id).is_ok_and(|run| !is_done(run.phase)) {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            eprint_error(
+                args.json,
+                "term",
+                &format!("task {task} not found in run {run_id}"),
+            );
+            return EXIT_FAILED;
+        };
+        let latest = snapshot
+            .runtime
+            .attempts
+            .last()
+            .map(|attempt| attempt.attempt_id.0);
+        let live = latest
+            .filter(|attempt| attached.is_none_or(|done| *attempt > done))
+            .and_then(|attempt| {
+                let dir = state.attempt_dir(run_id, task, attempt);
+                if dir.join("result.json").exists() {
+                    return None;
+                }
+                let launch: crate::runtime::engine::LaunchFile =
+                    serde_json::from_slice(&std::fs::read(dir.join("launch.json")).ok()?).ok()?;
+                Some((attempt, launch.tty))
+            });
+        match live {
+            Some((attempt, None)) => {
+                eprint_error(
+                    args.json,
+                    "term",
+                    &format!(
+                        "task {task} attempt {attempt} does not run in a terminal (runner: pty); use logs"
+                    ),
+                );
+                return EXIT_CONFIG;
+            }
+            Some((attempt, Some(socket))) if socket.exists() => {
+                eprintln!(
+                    "--- {task} attempt {attempt} (Ctrl+] detaches; the task keeps running) ---"
+                );
+                match crate::runtime::tty::attach(&socket) {
+                    Ok(crate::runtime::tty::Detach::User) => {
+                        eprintln!("\r\ndetached from {task}");
+                        return EXIT_OK;
+                    }
+                    Ok(crate::runtime::tty::Detach::Closed) => {
+                        attached = Some(attempt);
+                        announced = false;
+                        continue;
+                    }
+                    // 終了した直後で接続できなかった。終了前なら少し待って接続し直す。
+                    Err(_) if dir_has_result(state, run_id, task, attempt) => {
+                        attached = Some(attempt);
+                    }
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                }
+            }
+            _ => {}
+        }
+        let task_done = !matches!(
+            snapshot.runtime.state,
+            TaskState::Waiting | TaskState::Starting | TaskState::Running | TaskState::Stopping
+        );
+        let run_done = store.run(run_id).is_ok_and(|run| is_done(run.phase));
+        if !args.keep
+            && (task_done || run_done)
+            && (attached.is_some() || latest.is_none() || run_done)
+        {
+            return EXIT_OK;
+        }
+        if !announced {
+            eprintln!("waiting for {task} to start in a terminal...");
+            announced = true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn dir_has_result(state: &StateDir, run_id: &str, task: &str, attempt: u32) -> bool {
+    state
+        .attempt_dir(run_id, task, attempt)
+        .join("result.json")
+        .exists()
 }
 
 fn command_version(program: &str, arg: &str) -> Option<String> {

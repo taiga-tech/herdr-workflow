@@ -171,6 +171,53 @@ fn up_then_stop_leaves_run_stopped() {
 }
 
 #[test]
+fn term_relays_input_to_a_pty_task_and_ends_with_it() {
+    // Q04: runner: ptyのタスクへ別のプロセスから端末として接続し、入力を渡す。
+    use std::io::Write;
+    let env = Env::new();
+    let config = env.write_workflow(
+        "  ask:\n    type: command\n    lifecycle: job\n    runner: pty\n    argv: [/bin/sh, -c, 'printf \"name? \"; read name; echo \"hello $name\"; test -t 0']\n",
+        "",
+    );
+    let up = env.cli(&["up", "--config", path(&config)]);
+    assert_eq!(up.status.code(), Some(0), "{up:?}");
+    let run_id = String::from_utf8_lossy(&up.stdout).trim().to_string();
+    let mut term = Command::new(env!("CARGO_BIN_EXE_herdr-workflow"))
+        .args(["term", &run_id, "--task", "ask"])
+        .env("HERDR_WORKFLOW_STATE_DIR", &env.state)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // 接続前の出力も直近の出力として表示される。
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let _ = term.stdin.as_mut().unwrap().write_all(b"herdr\r");
+    let output = term.wait_with_output().unwrap();
+    let shown = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(shown.contains("name? "), "{shown}");
+    assert!(shown.contains("hello herdr"), "{shown}");
+    let wait = env.cli(&[
+        "wait",
+        &run_id,
+        "--until",
+        "finished",
+        "--timeout",
+        "20",
+        "--json",
+    ]);
+    let report: serde_json::Value = serde_json::from_slice(&wait.stdout).unwrap();
+    // 標準入力が端末であることを子プロセス自身が確かめて成功する。
+    assert_eq!(
+        report["tasks"]["ask"]["runtime"]["state"], "succeeded",
+        "{report}"
+    );
+    let logs = env.cli(&["logs", &run_id, "--task", "ask"]);
+    assert!(String::from_utf8_lossy(&logs.stdout).contains("hello herdr"));
+}
+
+#[test]
 fn retry_runs_a_new_attempt_without_repeating_succeeded_tasks() {
     let env = Env::new();
     let config = env.write_workflow(

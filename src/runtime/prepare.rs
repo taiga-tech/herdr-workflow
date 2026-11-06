@@ -95,6 +95,8 @@ pub struct PreparedTask {
     pub retry_delay: Duration,
     pub depends_on: Vec<DependsOn>,
     pub on_dependency_lost: OnDependencyLost,
+    /// `runner: pty`(擬似端末で実行する)。
+    pub pty: bool,
 }
 
 impl PreparedTask {
@@ -207,6 +209,7 @@ pub fn prepare_task(
         on_dependency_lost,
         locks,
         retry,
+        runner,
         ..
     }) = spec.tasks.get(id)
     else {
@@ -355,6 +358,7 @@ pub fn prepare_task(
         retry_delay: Duration::from_secs(retry.map_or(0, |retry| retry.delay_seconds)),
         depends_on: depends_on.clone(),
         on_dependency_lost: on_dependency_lost.unwrap_or(OnDependencyLost::Stop),
+        pty: *runner == crate::config::model::RunnerKind::Pty,
     })
 }
 

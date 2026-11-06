@@ -22,6 +22,8 @@ updated: '2026-09-12'
 
 Herdr連携のRunは、集計値(`flow_state`・`flow_running`・`flow_failed`・`flow_progress`)をworkspaceのtokenとして変化のたびに報告する。HerdrのSpace sidebar行に`$flow_state`等を書くと表示できる(Q03)。
 
+対話コマンド用の`runner: pty`と、端末として接続する`term`を追加した(Q04、ADR-0008)。キー入力、Ctrl+C、端末サイズの変更が子プロセスへ届き、切り離しても子プロセスは止まらない。Herdr連携では対話タスクのログpaneが端末になる。
+
 ## 文書版0.2 — 2026-09-12
 
 固有の仕様を持たない旧設計書パスの案内と、移管時の一回限りの検査結果を削除した。元資料と移行表は監査用に維持し、誤って整形されていた元資料を記録済みの原本へ復元した。

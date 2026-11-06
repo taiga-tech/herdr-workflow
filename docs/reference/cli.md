@@ -32,6 +32,7 @@ updated: '2026-09-17'
 | `wait RUN --until ready`        | 初期化、配置、選択した常駐タスクの準備を待つ                |
 | `status [RUN]`                  | 実行状態、待機条件、失敗、最終確認時刻を表示                |
 | `logs RUN --task TASK`          | 指定タスクのログを表示                                      |
+| `term RUN --task TASK [--keep]` | `runner: pty`のタスクへ端末として接続する                   |
 | `stop RUN`                      | 所有タスクを停止する。worktreeは残す                        |
 | `resume RUN [--yes]`            | 保存済み計画と実状態を照合して再開する                      |
 | `retry RUN --task TASK [--yes]` | 指定タスクを新しいAttemptとして再試行する                   |
@@ -46,13 +47,14 @@ updated: '2026-09-17'
 
 ### 実装済みの範囲
 
-`validate`・`plan`・`schema`に加え、`run`・`up`・`attach`・`wait`・`status`・`logs`・`stop`・`resume`・`retry`・`cleanup plan`・`remove`・`trust`・`hook`・`doctor`・`coordinator`を実装した(`src/cli.rs`・`src/commands.rs`)。`--herdr`を付けた`up`・`attach`はHerdr連携で実行し([Herdr連携](../integrations/herdr.md#implemented))、付けない場合は単独CLI(headless)で実行する。headlessではAgentタスクを含む計画を外部操作の前に拒否する。
+`validate`・`plan`・`schema`に加え、`run`・`up`・`attach`・`wait`・`status`・`logs`・`term`・`stop`・`resume`・`retry`・`cleanup plan`・`remove`・`trust`・`hook`・`doctor`・`coordinator`を実装した(`src/cli.rs`・`src/commands.rs`)。`--herdr`を付けた`up`・`attach`はHerdr連携で実行し([Herdr連携](../integrations/herdr.md#implemented))、付けない場合は単独CLI(headless)で実行する。headlessではAgentタスクを含む計画を外部操作の前に拒否する。
 
 - 対象checkoutは`--checkout PATH`(省略時は現在のディレクトリ)とする。`worktree.mode: attach`ではGit CLIで照合し、別リポジトリ、ブランチ不一致、detached HEADを拒否する。`worktree.mode: create`の設定でも、headlessでは指定したcheckoutを借用して実行し、新しいworktreeは作らない。
 - `run --target TASK`は対象とその依存先、初期化対象だけを実行し、対象の結果が確定したら残りの所有タスクを依存の逆順に停止して終了する。進捗は標準エラー、結果は標準出力(`--json`でJSON)へ出す。Ctrl+Cで停止を要求し、終了コード130を返す。
 - `up`は全タスクを対象とするRunを受け付けてRun IDだけを返す。`wait RUN --until ready|finished [--timeout 秒]`で待つ。`ready`は初期化が成功し、Runのserviceがすべて`running`かつ`ready`の状態を指す。
 - `logs RUN --task TASK [--attempt N] [--stream stdout|stderr] [--follow [--keep]]`は保存したログの表示用テキストを出し、`--json`では記録をそのまま出す。`--follow`は自動再試行の新しいAttemptも区切り行を付けて続けて表示し、Taskの結果が確定するかRunが終わると終える。`--keep`を付けるとRunの終了後も終えず、`resume`・`retry`の新しいAttemptを待つ。
 - `status`はAgentタスクの観測値(`observed: idle`等)も表示する。
+- `term RUN --task TASK [--keep]`は`runner: pty`のタスクの最新のAttemptへ端末として接続する。キー入力・Ctrl+C・端末サイズを渡し、Ctrl+]で切り離す。切り離しても子プロセスは止めない。開始前なら起動を待ち、Attemptが終わると終える。`--keep`では次のAttemptを待って接続し直す(動作規則は[対話コマンド](../specs/execution.md#interactive))。
 - `resume RUN`は停止・終了済みのRunを保存済みの計画で再開する。Agentタスクを含むRunと、Herdrで画面を配置したRunは、要求元の`HERDR_SOCKET_PATH`を使ってHerdr連携で再開する(動作規則は[復旧](../specs/recovery.md#agent-resume))。成功済みのTaskは繰り返さず、状態不明のTaskは起動しない。`retry RUN --task TASK`は指定タスクを新しいAttemptとして実行し、未成功の依存先も再実行する。どちらも外部操作の前にRun開始時(前回の再開時)からの変更を調べ、lockfile等の変更、checkoutの作り直し、設定ファイルの変更、Herdrのpaneの欠損があれば一覧を示して確認を求める。端末では`y`で続け、端末がない場合は終了コード3で終える。`--yes`は確認済みとして続ける。lockfile等が変わっていれば成功済みのTaskも実行し直す(規則は[再開前の変更検出](../specs/recovery.md#resume-changes))。
 - `cleanup plan RUN`は対象checkout、ブランチ、追跡ファイルの変更、未追跡ファイル、ignore対象ファイル、稼働中の可能性があるTask、所有workspaceと保留理由を表示する。`remove RUN`は`up --herdr`が作成したworktreeだけを対象とし、保留理由が一つでもあれば何も削除せず終了コード4を返す。条件を満たす場合はHerdrの`worktree.remove`を呼び、ブランチは残す。`status RUN --watch [--keep]`は1秒ごとに再描画する状態画面であり、`--keep`ではRunの終了後も再描画を続ける。
 - `trust --config PATH`は承認内容(コマンド、コピー対象、Agent、環境変数名、秘密値名、ロック、HTTP確認先)を表示して承認を記録する。`hook`は承認済みの設定だけを初期化し、未承認、承認後のGitのhook・フィルターの変更、detached checkout、イベントから決められない必須入力では保留して終了コード3を返す(`holdReason`は`needs-approval`・`needs-branch`・`needs-input`)。動作規則は[承認と秘密情報](../specs/security.md#approval)を参照する。

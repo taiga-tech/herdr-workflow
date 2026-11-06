@@ -43,6 +43,9 @@ pub struct LaunchRequest {
     pub log_generations: u32,
     /// `launch.json`に記録する表示用のコマンド(秘密値を含まない)。
     pub command_summary: String,
+    /// `runner: pty`のとき、端末クライアントの接続を受けるソケット(ADR-0008)。
+    #[serde(default)]
+    pub tty_socket: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for LaunchRequest {
@@ -131,6 +134,9 @@ pub struct LaunchFile {
     pub child: ProcessIdentity,
     pub runner: Option<ProcessIdentity>,
     pub started_at: String,
+    /// `runner: pty`の端末クライアントの接続先。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tty: Option<PathBuf>,
 }
 
 /// `result.json`(終了結果)。一時ファイルからの置換で確定する。
@@ -247,7 +253,18 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         cwd: request.cwd.clone(),
         env: request.decode_env(),
     };
-    let spawned = match process::spawn(&spec) {
+    let spawned = match &request.tty_socket {
+        Some(socket) => spawn_with_tty(&spec, socket),
+        None => process::spawn(&spec).map(|spawned| Launched {
+            identity: spawned.identity,
+            handle: spawned.handle,
+            waiter: spawned.waiter,
+            stdout: Box::new(spawned.stdout),
+            stderr: Box::new(spawned.stderr),
+            tty: None,
+        }),
+    };
+    let spawned = match spawned {
         Ok(spawned) => spawned,
         Err(error) => {
             reporter.send(&Report::LaunchFailed {
@@ -267,6 +284,7 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         child: spawned.identity.clone(),
         runner: runner.clone(),
         started_at: started_at.clone(),
+        tty: request.tty_socket.clone(),
     };
     if let Ok(bytes) = serde_json::to_vec_pretty(&launch) {
         let _ = write_atomic(&request.attempt_dir.join("launch.json"), &bytes);
@@ -282,12 +300,8 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
     let mut pumps = Vec::new();
     let (pump_done_tx, pump_done_rx) = std::sync::mpsc::channel::<()>();
     for (stream, reader, writer) in [
-        (
-            Stream::Stdout,
-            Box::new(spawned.stdout) as Box<dyn Read + Send>,
-            stdout_writer,
-        ),
-        (Stream::Stderr, Box::new(spawned.stderr), stderr_writer),
+        (Stream::Stdout, spawned.stdout, stdout_writer),
+        (Stream::Stderr, spawned.stderr, stderr_writer),
     ] {
         let record = LogRecord {
             run_id: request.run_id.clone(),
@@ -395,6 +409,10 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
             let _ = write_atomic(&request.attempt_dir.join("result.json"), &bytes);
         }
     }
+    if let Some((hub, socket)) = &spawned.tty {
+        hub.close();
+        let _ = std::fs::remove_file(socket);
+    }
     reporter.send(&Report::Exited {
         exit_code,
         signal,
@@ -406,6 +424,66 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         let _ = pump.join();
     }
     0
+}
+
+/// 起動した子プロセスと出力の読み口。
+struct Launched {
+    identity: ProcessIdentity,
+    handle: process::ProcessHandle,
+    waiter: process::Waiter,
+    stdout: Box<dyn Read + Send>,
+    stderr: Box<dyn Read + Send>,
+    /// `runner: pty`の端末共有と接続先。
+    tty: Option<(crate::runtime::tty::Hub, PathBuf)>,
+}
+
+/// 擬似端末で起動する。出力は端末クライアントへ配り、同じ内容を標準出力のログとして記録する
+/// (擬似端末では標準出力と標準エラーを区別できない)。
+fn spawn_with_tty(spec: &LaunchSpec, socket: &std::path::Path) -> std::io::Result<Launched> {
+    use crate::runtime::tty;
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(parent) = socket.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let _ = std::fs::remove_file(socket);
+    let listener = std::os::unix::net::UnixListener::bind(socket)?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
+    let pty = tty::open_pty()?;
+    let spawned = process::spawn_pty(spec, &pty.slave)?;
+    drop(pty.slave);
+    let master = std::fs::File::from(pty.master);
+    let hub = tty::Hub::new(master.try_clone()?);
+    let (reader, mut writer) = std::io::pipe()?;
+    {
+        let hub = hub.clone();
+        std::thread::spawn(move || hub.serve(listener));
+    }
+    {
+        let hub = hub.clone();
+        let mut master = master;
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 4096];
+            loop {
+                // 子プロセス側がすべて閉じるとLinuxではEIOになる。
+                let read = match master.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => read,
+                };
+                hub.broadcast(&buffer[..read]);
+                if writer.write_all(&buffer[..read]).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    Ok(Launched {
+        identity: spawned.identity,
+        handle: spawned.handle,
+        waiter: spawned.waiter,
+        stdout: Box::new(reader),
+        stderr: Box::new(std::io::empty()),
+        tty: Some((hub, socket.to_path_buf())),
+    })
 }
 
 /// `herdr-workflow runner`の入口。自分のプロセスグループに入り、端末の信号を受けない。
@@ -563,6 +641,7 @@ mod tests {
 
     fn request(dir: &std::path::Path, script: &str) -> LaunchRequest {
         LaunchRequest {
+            tty_socket: None,
             run_id: "r".to_string(),
             task_id: "t".to_string(),
             attempt_id: 1,
@@ -589,6 +668,118 @@ mod tests {
             }
         }
         reports
+    }
+
+    /// 端末クライアントとして接続し、`want`が出力に現れるまで読む。
+    fn read_until(stream: &mut std::os::unix::net::UnixStream, seen: &mut String, want: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+            .unwrap();
+        let mut buffer = [0u8; 1024];
+        while !seen.contains(want) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{want:?} not in {seen:?}"
+            );
+            if let Ok(read) = std::io::Read::read(stream, &mut buffer) {
+                seen.push_str(&String::from_utf8_lossy(&buffer[..read]));
+            }
+        }
+    }
+
+    fn pty_request(dir: &std::path::Path, script: &str) -> (LaunchRequest, PathBuf) {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let socket = PathBuf::from(format!(
+            "/tmp/hwt-{}-{}.sock",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut request = request(dir, script);
+        request.tty_socket = Some(socket.clone());
+        (request, socket)
+    }
+
+    #[test]
+    fn pty_runner_relays_keys_and_ctrl_c_to_the_foreground_group() {
+        // Q04: キー入力と前景プロセスグループへのCtrl+C。出力は標準出力のログにも残る。
+        use crate::runtime::tty;
+        let tmp = TempDir::new("runner-pty");
+        let (request, socket) = pty_request(
+            &tmp.0,
+            "printf 'ready\\n'; read line; echo \"got:$line\"; trap 'echo INT; exit 3' INT; while :; do sleep 0.1; done",
+        );
+        let mut connection = Launcher::Thread.start(&request).unwrap();
+        assert!(matches!(
+            read_report(connection.output.as_mut()),
+            Some(Report::Started { .. })
+        ));
+        let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        let mut seen = String::new();
+        read_until(&mut client, &mut seen, "ready");
+        tty::send_input(&mut client, b"hello\r").unwrap();
+        read_until(&mut client, &mut seen, "got:hello");
+        tty::send_input(&mut client, &[0x03]).unwrap();
+        read_until(&mut client, &mut seen, "INT");
+        let reports = collect(connection);
+        assert!(
+            matches!(
+                reports.last(),
+                Some(Report::Exited {
+                    exit_code: Some(3),
+                    ..
+                })
+            ),
+            "{reports:?}"
+        );
+        assert!(!socket.exists());
+        let launch: LaunchFile =
+            serde_json::from_slice(&std::fs::read(tmp.0.join("launch.json")).unwrap()).unwrap();
+        assert_eq!(launch.tty, Some(socket));
+        let logged: Vec<String> = logs::read_records(&tmp.0.join("stdout.log"), 1)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.data)
+            .collect();
+        assert!(logged.iter().any(|line| line == "got:hello"), "{logged:?}");
+    }
+
+    #[test]
+    fn pty_runner_applies_terminal_size_and_keeps_running_without_clients() {
+        // Q04: 端末サイズの変更はSIGWINCHとして届き、接続を閉じても子プロセスは止まらない。
+        use crate::runtime::tty;
+        let tmp = TempDir::new("runner-pty");
+        let (request, socket) = pty_request(
+            &tmp.0,
+            "trap 'echo size:$(stty size); exit 0' WINCH; printf 'ready\\n'; while :; do sleep 0.1; done",
+        );
+        let mut connection = Launcher::Thread.start(&request).unwrap();
+        assert!(matches!(
+            read_report(connection.output.as_mut()),
+            Some(Report::Started { .. })
+        ));
+        {
+            let mut first = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+            let mut seen = String::new();
+            read_until(&mut first, &mut seen, "ready");
+        }
+        // 切り離した後に接続し直すと、直近の出力から表示し直す。
+        let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        let mut seen = String::new();
+        read_until(&mut client, &mut seen, "ready");
+        tty::send_resize(&mut client, 40, 100).unwrap();
+        read_until(&mut client, &mut seen, "size:40 100");
+        let reports = collect(connection);
+        assert!(
+            matches!(
+                reports.last(),
+                Some(Report::Exited {
+                    exit_code: Some(0),
+                    ..
+                })
+            ),
+            "{reports:?}"
+        );
     }
 
     #[test]

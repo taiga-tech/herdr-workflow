@@ -544,8 +544,18 @@
             "required": ["maxAttempts"]
         },
         "RunnerKind": {
-            "type": "string",
-            "enum": ["supervised"]
+            "oneOf": [
+                {
+                    "description": "標準出力と標準エラーをパイプで受ける非対話の実行。",
+                    "type": "string",
+                    "const": "supervised"
+                },
+                {
+                    "description": "擬似端末で実行し、`herdr-workflow term`から操作する対話の実行(ADR-0008)。",
+                    "type": "string",
+                    "const": "pty"
+                }
+            ]
         },
         "ScriptSpec": {
             "description": "シェル経由で実行する本文。`shell`の末尾に`source`を一つの引数として追加して起動する。\nどちらにも`${...}`の値置換は行わない(docs/specs/execution.md#script)。",
