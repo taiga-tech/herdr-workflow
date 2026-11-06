@@ -7,6 +7,7 @@ pub mod logs;
 pub mod prepare;
 pub mod process;
 pub mod readiness;
+pub mod runner;
 pub mod session;
 pub mod state_dir;
 pub mod store;
