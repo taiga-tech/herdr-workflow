@@ -35,6 +35,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// 状態不明のTaskの結果を取り込む間隔。
 const IMPORT_INTERVAL: Duration = Duration::from_secs(1);
+/// ログの総容量を確かめる間隔。
+const TOTAL_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const COORDINATOR_LOCK: &str = "coordinator";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1315,6 +1317,61 @@ pub fn prune_logs(
     Ok(removed)
 }
 
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => dir_size(&entry.path()),
+            Ok(kind) if kind.is_file() => entry.metadata().map_or(0, |m| m.len()),
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Attemptファイルの合計が上限を超えていれば、終了・停止済みRunを古い順に削除する。
+/// 稼働中と状態不明のRunは数えるが削除しない。状態ストアの記録は残す。
+pub fn prune_by_total(
+    state: &StateDir,
+    store: &Store,
+    max_total_bytes: u64,
+) -> Result<Vec<String>, CoordinatorError> {
+    let mut runs: Vec<(RunRecord, u64)> = store
+        .recent_runs(u32::MAX)
+        .map_err(io_err)?
+        .into_iter()
+        .map(|run| {
+            let size = dir_size(&state.run_dir(&run.run_id));
+            (run, size)
+        })
+        .collect();
+    let mut total: u64 = runs.iter().map(|(_, size)| *size).sum();
+    // 古いものから消すため、最終更新の昇順に並べる。
+    runs.sort_by(|a, b| a.0.updated_at.cmp(&b.0.updated_at));
+    let mut removed = Vec::new();
+    for (run, size) in runs {
+        if total <= max_total_bytes {
+            break;
+        }
+        if size == 0
+            || !matches!(run.phase, RunPhase::Stopped | RunPhase::Finished)
+            || run.outcome == RunOutcome::Unknown
+        {
+            continue;
+        }
+        std::fs::remove_dir_all(state.run_dir(&run.run_id)).map_err(io_err)?;
+        total = total.saturating_sub(size);
+        let _ = store.add_event(
+            &run.run_id,
+            &format!("logs removed to keep the total under {max_total_bytes} bytes"),
+        );
+        removed.push(run.run_id);
+    }
+    Ok(removed)
+}
+
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_terminate(_: libc::c_int) {
@@ -1348,12 +1405,19 @@ pub fn serve(state: &StateDir, idle_exit: Duration) -> Result<(), CoordinatorErr
         let mut store = Store::open(&state.db_path()).map_err(io_err)?;
         reconcile_orphans(state, &mut store)?;
         import_finished_results(state, &mut store)?;
-        // 保持日数はCoordinatorの起動元のプラグイン全体設定から読む。
-        if let Some(days) = crate::config::plugin::load_from_env()
-            .ok()
+        // 保持日数と総容量はCoordinatorの起動元のプラグイン全体設定から読む。
+        let plugin = crate::config::plugin::load_from_env().ok();
+        if let Some(days) = plugin
+            .as_ref()
             .and_then(|config| config.log_retention_days())
         {
             prune_logs(state, &store, days, SystemTime::now())?;
+        }
+        if let Some(total) = plugin
+            .as_ref()
+            .and_then(|config| config.log_max_total_bytes())
+        {
+            prune_by_total(state, &store, total)?;
         }
     }
     // ロックを保持しているので、残っているソケットは前回の残骸。
@@ -1375,10 +1439,20 @@ pub fn serve(state: &StateDir, idle_exit: Duration) -> Result<(), CoordinatorErr
     // 状態不明のTaskの結果を、TaskRunnerが確定し次第取り込む(T15)。
     let mut import_store = Store::open(&state.db_path()).map_err(io_err)?;
     let mut next_import = Instant::now() + IMPORT_INTERVAL;
+    let total_limit = crate::config::plugin::load_from_env()
+        .ok()
+        .and_then(|config| config.log_max_total_bytes());
+    let mut next_total_check = Instant::now() + TOTAL_CHECK_INTERVAL;
     loop {
         if Instant::now() >= next_import {
             next_import = Instant::now() + IMPORT_INTERVAL;
             let _ = import_finished_results(state, &mut import_store);
+        }
+        if let Some(limit) = total_limit
+            && Instant::now() >= next_total_check
+        {
+            next_total_check = Instant::now() + TOTAL_CHECK_INTERVAL;
+            let _ = prune_by_total(state, &import_store, limit);
         }
         match listener.accept() {
             Ok((stream, _)) => {
@@ -1884,6 +1958,80 @@ mod tests {
         }
         // Runの記録は残る。
         assert_eq!(store.run("old").unwrap().outcome, RunOutcome::Succeeded);
+    }
+
+    #[test]
+    fn total_limit_removes_oldest_finished_runs_first() {
+        use crate::runtime::state_dir::test_support::TempDir;
+        let tmp = TempDir::new("coord-total");
+        let state = StateDir::open(tmp.0.join("state")).unwrap();
+        let mut store = Store::open(&state.db_path()).unwrap();
+        let runs = [
+            (
+                "a",
+                RunPhase::Finished,
+                RunOutcome::Succeeded,
+                "2026-01-01T00:00:00.000Z",
+            ),
+            (
+                "b",
+                RunPhase::Active,
+                RunOutcome::Pending,
+                "2026-01-02T00:00:00.000Z",
+            ),
+            (
+                "c",
+                RunPhase::Stopped,
+                RunOutcome::Cancelled,
+                "2026-01-03T00:00:00.000Z",
+            ),
+            (
+                "d",
+                RunPhase::Finished,
+                RunOutcome::Failed,
+                "2026-01-04T00:00:00.000Z",
+            ),
+        ];
+        for (id, phase, outcome, at) in runs {
+            store
+                .insert_run(&RunRecord {
+                    run_id: id.to_string(),
+                    created_at: at.to_string(),
+                    updated_at: at.to_string(),
+                    plan_hash: String::new(),
+                    config_path: PathBuf::from("/c"),
+                    checkout: PathBuf::from("/w"),
+                    target: None,
+                    phase,
+                    outcome,
+                    workflow: String::new(),
+                    inputs: Vec::new(),
+                    coordinator_pid: None,
+                    plugin_config: String::new(),
+                    owned_workspace: None,
+                    herdr_state: None,
+                })
+                .unwrap();
+            store
+                .save_snapshot(&engine::RunSnapshot {
+                    run_id: id.to_string(),
+                    phase,
+                    outcome,
+                    target: None,
+                    tasks: BTreeMap::new(),
+                    updated_at: at.to_string(),
+                })
+                .unwrap();
+            let dir = state.attempt_dir(id, "t", 1);
+            state.ensure_subdir(&dir).unwrap();
+            std::fs::write(dir.join("stdout.log"), vec![b'x'; 1000]).unwrap();
+        }
+        // 4000バイトを2500バイト以下にする: 稼働中のbを飛ばし、古いaとcを消す。
+        let removed = prune_by_total(&state, &store, 2500).unwrap();
+        assert_eq!(removed, ["a", "c"]);
+        assert!(state.run_dir("b").exists());
+        assert!(state.run_dir("d").exists());
+        assert!(prune_by_total(&state, &store, 2500).unwrap().is_empty());
     }
 
     #[test]

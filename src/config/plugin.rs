@@ -16,6 +16,8 @@ pub const MAX_CONFIGURABLE_PANES_PER_TAB: u32 = 32;
 pub const MIN_LOG_FILE_BYTES: u64 = 1024 * 1024;
 pub const MAX_LOG_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_RETENTION_DAYS: u32 = 3650;
+pub const MIN_LOG_TOTAL_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_LOG_TOTAL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "RawPluginConfig", rename_all = "camelCase")]
@@ -48,6 +50,12 @@ impl PluginConfig {
     #[must_use]
     pub fn log_generations(&self) -> u32 {
         self.logs.generations
+    }
+
+    /// 終了したRunのAttemptファイルの合計の上限(バイト)。`None`は上限なし。
+    #[must_use]
+    pub fn log_max_total_bytes(&self) -> Option<u64> {
+        self.logs.max_total_bytes
     }
 
     /// 終了したRunのログを残す日数。`None`は削除しない。
@@ -108,6 +116,11 @@ impl TryFrom<RawPluginConfig> for PluginConfig {
                 max: MAX_RETENTION_DAYS,
             });
         }
+        if let Some(total) = logs.max_total_bytes
+            && !(MIN_LOG_TOTAL_BYTES..=MAX_LOG_TOTAL_BYTES).contains(&total)
+        {
+            return Err(PluginConfigError::InvalidLogTotalBytes { value: total });
+        }
         Ok(Self {
             version: raw.version,
             limits: raw.limits,
@@ -134,6 +147,8 @@ struct LogsConfig {
     generations: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     retention_days: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_total_bytes: Option<u64>,
 }
 
 impl Default for LogsConfig {
@@ -142,6 +157,7 @@ impl Default for LogsConfig {
             max_file_bytes: crate::runtime::logs::DEFAULT_MAX_BYTES,
             generations: crate::runtime::logs::DEFAULT_GENERATIONS,
             retention_days: None,
+            max_total_bytes: None,
         }
     }
 }
@@ -194,6 +210,8 @@ pub enum PluginConfigError {
     InvalidLogFileBytes { value: u64 },
     #[error("logs.generations must be between 1 and {max}, got {value}")]
     InvalidLogGenerations { value: u32, max: u32 },
+    #[error("logs.maxTotalBytes must be between 10 MiB and 1 TiB, got {value}")]
+    InvalidLogTotalBytes { value: u64 },
     #[error("logs.retentionDays must be between 1 and {max}, got {value}")]
     InvalidRetentionDays { value: u32, max: u32 },
 }
@@ -319,6 +337,16 @@ mod tests {
             Err(PluginConfigError::InvalidRetentionDays { .. })
         ));
         assert!(load_str("version: 1\nlogs:\n  unknown: 1\n").is_err());
+        assert_eq!(
+            load_str("version: 1\nlogs:\n  maxTotalBytes: 104857600\n")
+                .unwrap()
+                .log_max_total_bytes(),
+            Some(104_857_600)
+        );
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  maxTotalBytes: 1024\n"),
+            Err(PluginConfigError::InvalidLogTotalBytes { .. })
+        ));
     }
 
     #[test]
