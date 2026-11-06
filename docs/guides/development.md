@@ -3,7 +3,7 @@ id: GUIDE-DEVELOPMENT
 title: '開発環境と配布'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-11-06'
 ---
 
 # 開発環境と配布
@@ -82,6 +82,12 @@ mise run docs:check
 これらのmiseタスクは固定したuvからPythonスクリプトを実行し、追加Pythonパッケージを使わない。通常はMarkdownの相対リンク、明示アンカー、文書ID、受け入れ試験IDを検査する。`mise run docs:audit`を実行した場合だけ、章の移行先と保存した元資料のハッシュも検査する。Rustのビルド、Herdr通信、設定の意味検証は対象外である。
 
 CIでは文書検査と製品テストを別の結果として表示する。CIの権限やworkflowファイルは、対象リポジトリと必要権限を確認してから追加する。
+
+<a id="ci"></a>
+
+### CI
+
+GitHub Actionsの雛形を[ci/github-actions.yml](../../ci/github-actions.yml)に置く。このリポジトリのGitHub Appには`workflows`権限がないため、雛形は`.github/workflows/`の外にある。有効にするには、利用者が`.github/workflows/ci.yml`へ移してpushする。雛形はUbuntuとmacOSで`mise run rust:fmt`・`rust:clippy`・`rust:test`を、Ubuntuで文書検査とprettierを実行する。macOSのjobは、この開発環境で検査できないクレート全体のdarwinビルドとプロセス識別の試験を補う。
 
 ## 関連文書
 
