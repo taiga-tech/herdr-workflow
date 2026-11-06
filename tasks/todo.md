@@ -523,3 +523,17 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 ### レビュー
 
 - グループ外へ移った子孫が出力のパイプを開いたままだと、TaskRunnerがログの取り込みの終了を待ち続けて結果の報告が遅れた。子プロセスの終了後に残存分を先に止め、取り込みの終了は最大2秒だけ待つように直した。
+
+## 仕様の残りの入口と照合
+
+- [x] T14: 記録前に起動したAttemptを照合で未起動扱いにしない
+- [x] `ifAlreadyCheckedOut: error`(作成要求前のGit照合、T13)
+- [x] `worktree.opened`・`worktree.removed`の受付(T28)
+- [x] 承認内容へGitのhookとフィルターを表示
+- [x] Herdr action `stop`・`cleanup-review`と、入力を尋ねる`up`の端末画面
+- [ ] Herdr実機・macOS実機での受け入れ試験、CI(GitHub Appのworkflows権限が必要)
+
+### レビュー
+
+- 試験環境の利用者全体のGit設定にgit-lfsのフィルターがあり、承認表示の試験が環境に依存していたため、追加分の差分で確かめる形にした。
+- `cargo fmt`・`clippy -D warnings`・`cargo test --locked`(単体264件、統合11＋3＋7件)がRust 1.93.1と1.97.0で成功。文書検査(通常・移行監査)とprettierも成功。
