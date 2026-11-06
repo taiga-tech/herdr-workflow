@@ -24,7 +24,7 @@ Herdrを利用する通常経路では、HerdrAdapterからworktree作成を依�
 
 既存ブランチの利用と新規ブランチ作成を区別する。`base`は新規ブランチを作る場合に使い、既存ブランチを指定した際にその内容を`base`へ巻き戻さない。
 
-別worktreeでcheckout済みのブランチに対して強制実行しない。既存checkoutの採用は`attach`で明示する。main worktreeを自動イベントの初期化対象に含めない。
+別worktreeでcheckout済みのブランチに対して強制実行しない。既存checkoutの採用は`attach`で明示する。`up --herdr`は`worktree.create`を送る前に`git worktree list --porcelain`で照合し、対象ブランチが既にcheckoutされていれば作成要求を送らずに拒否する(`ifAlreadyCheckedOut: error`)。main worktreeを自動イベントの初期化対象に含めない。
 
 <a id="attach"></a>
 

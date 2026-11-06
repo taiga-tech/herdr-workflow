@@ -146,6 +146,26 @@ pub fn is_ignored(repo: &Path, relative: &Path) -> Result<bool, GitError> {
     Ok(git(repo, &["check-ignore", "-q", "--no-index", "--", &relative])?.is_some())
 }
 
+/// `branch`を既にcheckoutしているworktreeのパス(`git worktree list --porcelain`)。
+pub fn worktree_for_branch(repo: &Path, branch: &str) -> Result<Option<PathBuf>, GitError> {
+    let list =
+        git(repo, &["worktree", "list", "--porcelain"])?.ok_or_else(|| GitError::NotWorkTree {
+            path: repo.to_path_buf(),
+        })?;
+    let wanted = format!("branch refs/heads/{branch}");
+    let mut current: Option<&str> = None;
+    for line in list.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current = Some(path);
+        } else if line == wanted
+            && let Some(path) = current
+        {
+            return Ok(Some(canonical(repo, path)));
+        }
+    }
+    Ok(None)
+}
+
 /// 状態の要約(削除前の確認に使う)。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorktreeChanges {
@@ -277,6 +297,23 @@ mod tests {
             validate_attach(&plain, None, None),
             Err(GitError::NotWorkTree { .. })
         ));
+    }
+
+    #[test]
+    fn worktree_for_branch_finds_existing_checkout() {
+        let tmp = TempDir::new("git");
+        let repo = init(&tmp.0.join("repo"));
+        run(
+            &repo,
+            &["worktree", "add", "-q", "-b", "feature/x", "../wt"],
+        );
+        let wt = std::fs::canonicalize(tmp.0.join("wt")).unwrap();
+        assert_eq!(worktree_for_branch(&repo, "feature/x").unwrap(), Some(wt));
+        assert_eq!(
+            worktree_for_branch(&repo, "main").unwrap(),
+            Some(repo.clone())
+        );
+        assert_eq!(worktree_for_branch(&repo, "feature/none").unwrap(), None);
     }
 
     #[test]

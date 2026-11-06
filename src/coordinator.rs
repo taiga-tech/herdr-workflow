@@ -593,6 +593,19 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
                 .parent()
                 .map_or_else(|| start.record.checkout.clone(), Path::to_path_buf);
             let repo = crate::approval::repo_key(&repo_dir);
+            // 別のworktreeで既にcheckout済みのブランチには強制実行しない(既定は
+            // `ifAlreadyCheckedOut: error`)。作成要求の前にGitの実状態を照合する(T13)。
+            if let Ok(Some(existing)) = crate::runtime::git::worktree_for_branch(&repo_dir, &branch)
+            {
+                return Err(ErrorBody {
+                    code: "conflict".to_string(),
+                    message: format!(
+                        "branch {branch} is already checked out at {}; use attach --herdr --checkout {} to adopt it",
+                        existing.display(),
+                        existing.display()
+                    ),
+                });
+            }
             // 自分の作成要求から届くworktree.createdを別Runとして扱わない(T12)。
             if let Ok(store) = Store::open(&shared.state.db_path()) {
                 let _ = store.accept_once(&format!("pending:{repo}:{branch}"), None);
@@ -1650,10 +1663,8 @@ mod tests {
         let config = repo.join(".herdr/workflow.yaml");
         std::fs::write(&config, workflow).unwrap();
         // Herdrが作るはずのcheckoutを先に用意し、偽Herdrはそのパスを返す。
-        run(
-            &repo,
-            &["worktree", "add", "-q", "-b", "feature/x", "../wt"],
-        );
+        // ブランチを付けるとcheckout済みとして拒否されるため、ここではdetachedで作る。
+        run(&repo, &["worktree", "add", "-q", "--detach", "../wt"]);
         let wt = std::fs::canonicalize(tmp.0.join("wt")).unwrap();
         let socket = PathBuf::from(format!("/tmp/hwf-{}.sock", std::process::id()));
         let fake = FakeHerdr::start(socket.clone(), wt.clone());
@@ -2154,6 +2165,55 @@ mod tests {
             tasks[&TaskId::from("later")].runtime.state,
             TaskState::Cancelled
         );
+    }
+
+    #[test]
+    fn herdr_up_refuses_a_branch_already_checked_out_elsewhere() {
+        use crate::herdr::fake::FakeHerdr;
+        use crate::runtime::git::test_repo::{init, run};
+        use crate::runtime::state_dir::test_support::TempDir;
+
+        let tmp = TempDir::new("coord-checked-out");
+        let repo = init(&tmp.0.join("repo"));
+        run(
+            &repo,
+            &["worktree", "add", "-q", "-b", "feature/x", "../wt"],
+        );
+        let workflow = "version: 1\nname: t\ninputs:\n  branch:\n    type: string\n    required: true\nworktree:\n  mode: create\n  branch: '${inputs.branch}'\nbootstrap:\n  targets: []\ntasks:\n  init:\n    type: command\n    lifecycle: job\n    runner: supervised\n    argv: [/bin/true]\nworkspace:\n  label: t\n  tabs:\n    - id: dev\n      label: dev\n      layout: { type: grid, columns: 1, rows: 1 }\n      panes:\n        - id: S\n          label: status\n          view: { type: status }\n          placement: { column: 1, row: 1 }\n";
+        let config = repo.join("workflow.yaml");
+        std::fs::write(&config, workflow).unwrap();
+        let socket = PathBuf::from(format!("/tmp/hwc-{}.sock", std::process::id()));
+        let fake = FakeHerdr::start(socket.clone(), tmp.0.join("other"));
+        let shared = Arc::new(Shared {
+            state: StateDir::open(tmp.0.join("state")).unwrap(),
+            runner: crate::runtime::runner::Launcher::Thread,
+            runs: Mutex::new(HashMap::new()),
+            last_activity: Mutex::new(Instant::now()),
+            shutdown: AtomicBool::new(false),
+        });
+        let mut env = current_env();
+        env.insert(
+            "HERDR_SOCKET_PATH".to_string(),
+            socket.display().to_string(),
+        );
+        let error = handle_start(
+            &shared,
+            json!({
+                "configPath": config, "workflow": workflow,
+                "inputs": [["branch", "feature/x"]],
+                "checkout": repo, "target": null, "env": env, "herdr": true,
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "conflict");
+        assert!(
+            error.message.contains("already checked out"),
+            "{}",
+            error.message
+        );
+        // 作成要求を送らず、worktreeを増やさない。
+        assert!(fake.methods().is_empty());
+        let _ = std::fs::remove_file(socket);
     }
 
     #[test]
