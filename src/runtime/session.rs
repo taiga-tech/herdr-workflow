@@ -255,6 +255,8 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         agent_poll: std::time::Duration::from_secs(2),
         log_max_bytes: request.plugin_config.log_max_file_bytes(),
         log_generations: request.plugin_config.log_generations(),
+        // 既定は同じプロセス内のスレッド。Coordinatorは別プロセスへ切り替える。
+        runner: crate::runtime::runner::Launcher::Thread,
     };
     Ok(PreparedRun {
         config,

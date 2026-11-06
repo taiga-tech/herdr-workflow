@@ -2,6 +2,10 @@ use herdr_workflow::{cli, commands};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // TaskRunner(Coordinatorが内部で起動する。ADR-0002)。
+    if args.first().map(String::as_str) == Some("runner") {
+        std::process::exit(herdr_workflow::runtime::runner::main());
+    }
     if args
         .first()
         .is_some_and(|subcommand| commands::handles(subcommand))

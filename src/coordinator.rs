@@ -194,6 +194,7 @@ struct ActiveRun {
 
 struct Shared {
     state: StateDir,
+    runner: crate::runtime::runner::Launcher,
     runs: Mutex<HashMap<String, ActiveRun>>,
     last_activity: Mutex<Instant>,
     shutdown: AtomicBool,
@@ -617,6 +618,8 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
     )
     .map_err(invalid)?;
     prepared.config.initial = std::mem::take(&mut start.initial);
+    // TaskRunnerは別プロセスで起動し、Coordinatorが終了しても子プロセスを止めない(ADR-0002)。
+    prepared.config.runner = shared.runner.clone();
     if start.herdr {
         let workspace_id = workspace_id.ok_or_else(|| {
             herdr_error("HERDR_WORKSPACE_ID is not set; run inside a Herdr workspace")
@@ -1274,6 +1277,7 @@ pub fn serve(state: &StateDir, idle_exit: Duration) -> Result<(), CoordinatorErr
     listener.set_nonblocking(true).map_err(io_err)?;
     let shared = Arc::new(Shared {
         state: state.clone(),
+        runner: crate::runtime::runner::Launcher::current().map_err(io_err)?,
         runs: Mutex::new(HashMap::new()),
         last_activity: Mutex::new(Instant::now()),
         shutdown: AtomicBool::new(false),
@@ -1461,6 +1465,7 @@ mod tests {
 
         let shared = Arc::new(Shared {
             state: StateDir::open(tmp.0.join("state")).unwrap(),
+            runner: crate::runtime::runner::Launcher::Thread,
             runs: Mutex::new(HashMap::new()),
             last_activity: Mutex::new(Instant::now()),
             shutdown: AtomicBool::new(false),
@@ -1590,6 +1595,7 @@ mod tests {
         let fake = FakeHerdr::start(socket.clone(), repo.clone());
         let shared = Arc::new(Shared {
             state: StateDir::open(tmp.0.join("state")).unwrap(),
+            runner: crate::runtime::runner::Launcher::Thread,
             runs: Mutex::new(HashMap::new()),
             last_activity: Mutex::new(Instant::now()),
             shutdown: AtomicBool::new(false),

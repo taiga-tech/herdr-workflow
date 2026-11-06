@@ -145,6 +145,9 @@ pub struct ResultFile {
     pub finished_at: String,
 }
 
+/// 子プロセスの終了後、ログの取り込みが終わるのを待つ上限。
+const PUMP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension("tmp");
@@ -277,6 +280,7 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
     let report_lines = Arc::new(AtomicBool::new(request.report_lines));
     let masker = Masker::new(request.masked.clone());
     let mut pumps = Vec::new();
+    let (pump_done_tx, pump_done_rx) = std::sync::mpsc::channel::<()>();
     for (stream, reader, writer) in [
         (
             Stream::Stdout,
@@ -297,6 +301,7 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         let masker = masker.clone();
         let reporter = reporter.clone();
         let wanted = Arc::clone(&report_lines);
+        let done = pump_done_tx.clone();
         pumps.push(std::thread::spawn(move || {
             let lines_reporter = reporter.clone();
             let (lines, degraded) = logs::pump(reader, writer, &record, &masker, |line| {
@@ -312,6 +317,7 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
                 lines,
                 degraded,
             });
+            let _ = done.send(());
         }));
     }
 
@@ -354,9 +360,7 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         .wait()
         .map(process::classify_exit)
         .map_err(|error| error.to_string());
-    for pump in pumps {
-        let _ = pump.join();
-    }
+    // 停止時に記録した子孫が残っていれば先に止める(出力のパイプを握っていることがある)。
     let survivors: Vec<u32> = descendants
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -364,6 +368,15 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         .filter(|identity| process::signal_if_same(identity, libc::SIGKILL))
         .map(|identity| identity.pid)
         .collect();
+    // 子孫がパイプを開いたままだとstreamが閉じないため、取り込みの終了は少しだけ待つ。
+    drop(pump_done_tx);
+    let deadline = std::time::Instant::now() + PUMP_GRACE;
+    for _ in 0..pumps.len() {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if pump_done_rx.recv_timeout(remaining).is_err() {
+            break;
+        }
+    }
     let (exit_code, signal, error) = match &exit {
         Ok(Exit::Code(code)) => (Some(*code), None, None),
         Ok(Exit::Signal(signal)) => (None, Some(signal.clone()), None),
@@ -388,6 +401,10 @@ pub fn serve(input: Box<dyn Read + Send>, output: Box<dyn Write + Send>) -> i32 
         survivors,
         error,
     });
+    // 残った出力は、パイプが閉じるまで取り込み続ける。
+    for pump in pumps {
+        let _ = pump.join();
+    }
     0
 }
 
@@ -433,10 +450,13 @@ impl Launcher {
         line.push(b'\n');
         match self {
             Self::Process(exe) => {
+                use std::os::unix::fs::OpenOptionsExt;
                 use std::os::unix::process::CommandExt;
+                // TaskRunner自身の診断出力。状態ディレクトリのファイルは0600で作る。
                 let stderr = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
+                    .mode(0o600)
                     .open(request.attempt_dir.join("runner.log"))?;
                 let mut child = std::process::Command::new(exe)
                     .arg("runner")

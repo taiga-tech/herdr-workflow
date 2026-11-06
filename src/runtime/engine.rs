@@ -7,7 +7,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -23,9 +22,10 @@ use crate::config::secrets::{self, SecretsFile};
 use crate::plan::compile::ExecutionPlan;
 use crate::plan::schedule;
 use crate::runtime::locks::{self, LockAttempt, LockGuard};
-use crate::runtime::logs::{self, LogRecord, LogWriter, Masker, Stream};
+use crate::runtime::logs::{self, Stream};
 use crate::runtime::prepare::{self, PreparedTask, Readiness};
-use crate::runtime::process::{self, Exit, LaunchSpec, ProcessHandle, ProcessIdentity};
+use crate::runtime::process::Exit;
+use crate::runtime::runner;
 use crate::runtime::state_dir::StateDir;
 use crate::state::models::{
     AgentObservation, AttemptId, AttemptOutcome, AttemptResult, LaunchEvidence, LogPosition,
@@ -90,6 +90,8 @@ pub struct RunConfig {
     /// Attemptログ1ファイルの上限と世代数(プラグイン全体設定の`logs`)。
     pub log_max_bytes: u64,
     pub log_generations: u32,
+    /// TaskRunnerの起動方法(ADR-0002)。Coordinatorは別プロセス、単体試験はスレッド。
+    pub runner: runner::Launcher,
 }
 
 /// 画面構築の結果。Agentごとの扱いを返す。
@@ -205,6 +207,8 @@ enum Event {
         task: TaskId,
         attempt: u32,
         exit: Result<Exit, String>,
+        /// TaskRunnerが停止時に記録し、終了後に強制終了した子孫(T26)。
+        survivors: Vec<u32>,
     },
     StreamClosed {
         task: TaskId,
@@ -250,7 +254,9 @@ enum StopKind {
 
 struct LiveAttempt {
     attempt: u32,
-    handle: ProcessHandle,
+    /// TaskRunnerへの指示口。停止信号はTaskRunnerが子プロセスの回収前に限って送る。
+    handle: runner::Control,
+    pid: u32,
     deadline: Option<Instant>,
     ready_deadline: Option<Instant>,
     successes: u32,
@@ -258,11 +264,8 @@ struct LiveAttempt {
     stop: Option<StopKind>,
     signaled_at: Option<Instant>,
     killed: bool,
-    /// 停止信号を送った時点の子孫(グループ外へ移ったものを含む)。
-    descendants: Vec<ProcessIdentity>,
     probe_cancel: Arc<AtomicBool>,
     probe_interval: Arc<AtomicU64>,
-    want_lines: Arc<AtomicBool>,
     guards: Vec<LockGuard>,
 }
 
@@ -289,48 +292,7 @@ impl Slot {
     }
 }
 
-/// `result.json`(Attemptの終了結果)。一時ファイルからの置換で確定する。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResultFile {
-    pub run_id: String,
-    pub task_id: String,
-    pub attempt_id: u32,
-    pub exit_code: Option<i32>,
-    pub signal: Option<String>,
-    pub finished_at: String,
-}
-
-/// `launch.json`(起動証跡)。秘密値と環境変数は含めない。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LaunchFile {
-    pub run_id: String,
-    pub task_id: String,
-    pub attempt_id: u32,
-    pub command: String,
-    pub cwd: PathBuf,
-    pub child: ProcessIdentity,
-    pub runner: Option<ProcessIdentity>,
-    pub started_at: String,
-}
-
-pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let tmp = path.with_extension("tmp");
-    {
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)
-}
+pub use crate::runtime::runner::{LaunchFile, ResultFile};
 
 pub struct Engine<'r> {
     config: RunConfig,
@@ -733,9 +695,8 @@ impl<'r> Engine<'r> {
                 }
                 live_attempt.stop.get_or_insert(kind);
                 live_attempt.signaled_at = Some(now);
-                live_attempt.descendants = process::descendants(live_attempt.handle.pid());
                 live_attempt.probe_cancel.store(true, Ordering::Relaxed);
-                live_attempt.handle.signal_group(libc::SIGTERM);
+                live_attempt.handle.signal(libc::SIGTERM);
                 slot.runtime.state = TaskState::Stopping;
                 self.dirty = true;
             } else if !live_attempt.killed
@@ -744,7 +705,7 @@ impl<'r> Engine<'r> {
                     .is_some_and(|at| now.duration_since(at) >= slot.prepared.grace)
             {
                 live_attempt.killed = true;
-                live_attempt.handle.signal_group(libc::SIGKILL);
+                live_attempt.handle.signal(libc::SIGKILL);
             }
         }
     }
@@ -1063,8 +1024,6 @@ impl<'r> Engine<'r> {
                     return;
                 }
             };
-        let masker = Masker::new(masked);
-
         let attempt_dir = self
             .state_dir
             .attempt_dir(&self.config.run_id, &id.0, attempt);
@@ -1072,137 +1031,113 @@ impl<'r> Engine<'r> {
             self.fail_launch(id, error.to_string());
             return;
         }
-        let writers = (
-            LogWriter::create(
-                attempt_dir.join(Stream::Stdout.file_name()),
-                self.config.log_max_bytes,
-                self.config.log_generations,
-            ),
-            LogWriter::create(
-                attempt_dir.join(Stream::Stderr.file_name()),
-                self.config.log_max_bytes,
-                self.config.log_generations,
-            ),
-        );
-        let (stdout_writer, stderr_writer) = match writers {
-            (Ok(out), Ok(err)) => (out, err),
-            (Err(error), _) | (_, Err(error)) => {
-                self.fail_launch(id, format!("log file: {error}"));
-                return;
-            }
-        };
-
-        let spec = LaunchSpec {
+        let request = runner::LaunchRequest {
+            run_id: self.config.run_id.clone(),
+            task_id: id.0.clone(),
+            attempt_id: attempt,
+            attempt_dir,
             program: prepared.program.clone(),
             args: prepared.args.clone(),
             cwd: prepared.cwd.clone(),
-            env,
+            env: runner::LaunchRequest::encode_env(&env),
+            masked,
+            report_lines: matches!(prepared.readiness, Readiness::Log { .. }),
+            log_max_bytes: self.config.log_max_bytes,
+            log_generations: self.config.log_generations,
+            command_summary: prepared.command_summary(),
         };
-        let spawned = match process::spawn(&spec) {
-            Ok(spawned) => spawned,
+        // TaskRunnerを起動し、子プロセスの起動結果を待つ(ADR-0002)。
+        let mut connection = match self.config.runner.start(&request) {
+            Ok(connection) => connection,
             Err(error) => {
-                self.fail_launch(id, format!("{}: {error}", prepared.program));
+                self.fail_launch(id, format!("task runner: {error}"));
                 return;
             }
         };
-        let started_at = logs::rfc3339(SystemTime::now());
-        let launch_file = LaunchFile {
-            run_id: self.config.run_id.clone(),
-            task_id: id.0.clone(),
-            attempt_id: attempt,
-            command: prepared.command_summary(),
-            cwd: prepared.cwd.clone(),
-            child: spawned.identity.clone(),
-            runner: process::observe(std::process::id()),
-            started_at: started_at.clone(),
+        let (pid, started_at) = match runner::read_report(connection.output.as_mut()) {
+            Some(runner::Report::Started {
+                child, started_at, ..
+            }) => (child.pid, started_at),
+            Some(runner::Report::LaunchFailed { reason }) => {
+                if let Some(mut process) = connection.process.take() {
+                    let _ = process.wait();
+                }
+                self.fail_launch(id, reason);
+                return;
+            }
+            other => {
+                if let Some(mut process) = connection.process.take() {
+                    let _ = process.wait();
+                }
+                self.fail_launch(id, format!("task runner did not report a start: {other:?}"));
+                return;
+            }
         };
-        let launch_degraded = serde_json::to_vec_pretty(&launch_file)
-            .ok()
-            .and_then(|bytes| write_atomic(&attempt_dir.join("launch.json"), &bytes).ok())
-            .is_none();
-
-        let want_lines = Arc::new(AtomicBool::new(matches!(
-            prepared.readiness,
-            Readiness::Log { .. }
-        )));
-        let template = |stream| LogRecord {
-            run_id: self.config.run_id.clone(),
-            task_id: id.0.clone(),
-            attempt_id: attempt,
-            time: String::new(),
-            stream,
-            seq: 0,
-            data: String::new(),
-        };
-        for (stream, reader, writer) in [
-            (
-                Stream::Stdout,
-                Box::new(spawned.stdout) as Box<dyn std::io::Read + Send>,
-                stdout_writer,
-            ),
-            (Stream::Stderr, Box::new(spawned.stderr), stderr_writer),
-        ] {
-            let tx = self.events_tx.clone();
-            let task = id.clone();
-            let want = Arc::clone(&want_lines);
-            let record = template(stream);
-            let masker = masker.clone();
-            self.threads.push(std::thread::spawn(move || {
-                let line_tx = tx.clone();
-                let line_task = task.clone();
-                let (lines, degraded) = logs::pump(reader, writer, &record, &masker, |line| {
-                    if want.load(Ordering::Relaxed) {
-                        let _ = line_tx.send(Event::Line {
-                            task: line_task.clone(),
-                            attempt,
-                            stream,
-                            text: line.to_string(),
-                        });
-                    }
-                });
-                let _ = tx.send(Event::StreamClosed {
-                    task,
-                    attempt,
-                    lines,
-                    degraded,
-                });
-            }));
-        }
-
-        let handle = spawned.handle.clone();
+        let handle = runner::Control::new(connection.input);
         {
             let tx = self.events_tx.clone();
             let task = id.clone();
-            let run_id = self.config.run_id.clone();
-            let result_path = attempt_dir.join("result.json");
-            let waiter = spawned.waiter;
+            let mut output = connection.output;
+            let mut process = connection.process;
             self.threads.push(std::thread::spawn(move || {
-                let exit = waiter
-                    .wait()
-                    .map(process::classify_exit)
-                    .map_err(|error| error.to_string());
-                if let Ok(exit) = &exit {
-                    let (exit_code, signal) = match exit {
-                        Exit::Code(code) => (Some(*code), None),
-                        Exit::Signal(signal) => (None, Some(signal.clone())),
+                let mut exited = false;
+                while let Some(report) = runner::read_report(output.as_mut()) {
+                    let event = match report {
+                        runner::Report::Line { stream, text } => Event::Line {
+                            task: task.clone(),
+                            attempt,
+                            stream,
+                            text,
+                        },
+                        runner::Report::StreamClosed {
+                            lines, degraded, ..
+                        } => Event::StreamClosed {
+                            task: task.clone(),
+                            attempt,
+                            lines,
+                            degraded,
+                        },
+                        runner::Report::Exited {
+                            exit_code,
+                            signal,
+                            survivors,
+                            error,
+                        } => {
+                            exited = true;
+                            let exit = match (exit_code, signal, error) {
+                                (Some(code), _, _) => Ok(Exit::Code(code)),
+                                (None, Some(signal), _) => Ok(Exit::Signal(signal)),
+                                (None, None, error) => {
+                                    Err(error.unwrap_or_else(|| "unknown exit".to_string()))
+                                }
+                            };
+                            Event::Exited {
+                                task: task.clone(),
+                                attempt,
+                                exit,
+                                survivors,
+                            }
+                        }
+                        runner::Report::Started { .. } | runner::Report::LaunchFailed { .. } => {
+                            continue;
+                        }
                     };
-                    let result = ResultFile {
-                        run_id,
-                        task_id: task.0.clone(),
-                        attempt_id: attempt,
-                        exit_code,
-                        signal,
-                        finished_at: logs::rfc3339(SystemTime::now()),
-                    };
-                    if let Ok(bytes) = serde_json::to_vec_pretty(&result) {
-                        let _ = write_atomic(&result_path, &bytes);
+                    if tx.send(event).is_err() {
+                        break;
                     }
                 }
-                let _ = tx.send(Event::Exited {
-                    task,
-                    attempt,
-                    exit,
-                });
+                if !exited {
+                    // TaskRunnerが結果を報告せずに終わった。結果を確定できない。
+                    let _ = tx.send(Event::Exited {
+                        task,
+                        attempt,
+                        exit: Err("task runner ended without reporting a result".to_string()),
+                        survivors: Vec::new(),
+                    });
+                }
+                if let Some(process) = process.as_mut() {
+                    let _ = process.wait();
+                }
             }));
         }
 
@@ -1263,7 +1198,7 @@ impl<'r> Engine<'r> {
         slot.runtime.record_attempt_result(AttemptResult {
             attempt_id: AttemptId(attempt),
             launch_evidence: LaunchEvidence {
-                pid: Some(handle.pid()),
+                pid: Some(pid),
                 started_at: Some(started_at),
                 command_summary: prepared.command_summary(),
             },
@@ -1276,6 +1211,7 @@ impl<'r> Engine<'r> {
         slot.live = Some(LiveAttempt {
             attempt,
             handle,
+            pid,
             deadline: prepared.timeout.map(|timeout| now + timeout),
             ready_deadline,
             successes: 0,
@@ -1283,10 +1219,8 @@ impl<'r> Engine<'r> {
             stop: None,
             signaled_at: None,
             killed: false,
-            descendants: Vec::new(),
             probe_cancel,
             probe_interval,
-            want_lines,
             guards,
         });
         self.dirty = true;
@@ -1295,9 +1229,6 @@ impl<'r> Engine<'r> {
             id.0,
             slot_pid(&self.slots[id])
         ));
-        if launch_degraded {
-            self.notice(format!("[{}] failed to write launch.json", id.0));
-        }
     }
 
     // ---- イベント ----
@@ -1316,7 +1247,8 @@ impl<'r> Engine<'r> {
                 task,
                 attempt,
                 exit,
-            } => self.on_exit(&task, attempt, exit),
+                survivors,
+            } => self.on_exit(&task, attempt, exit, &survivors),
             Event::StreamClosed {
                 task,
                 attempt,
@@ -1535,7 +1467,7 @@ impl<'r> Engine<'r> {
         {
             slot.runtime.readiness = ReadinessState::Ready;
             if let Some(live) = &slot.live {
-                live.want_lines.store(false, Ordering::Relaxed);
+                live.handle.send(&runner::Command::Lines { enabled: false });
             }
             self.dirty = true;
             self.notice(format!("[{}] ready (log matched)", task.0));
@@ -1602,7 +1534,13 @@ impl<'r> Engine<'r> {
         }
     }
 
-    fn on_exit(&mut self, task: &TaskId, attempt: u32, exit: Result<Exit, String>) {
+    fn on_exit(
+        &mut self,
+        task: &TaskId,
+        attempt: u32,
+        exit: Result<Exit, String>,
+        survivors: &[u32],
+    ) {
         let stopping_all = self.stopping_all.is_some();
         let Some((slot, true)) = self.live_mut(task, attempt) else {
             return;
@@ -1611,13 +1549,7 @@ impl<'r> Engine<'r> {
         live.probe_cancel.store(true, Ordering::Relaxed);
         drop(live.guards);
         slot.pending_stop = None;
-        // T26: 停止時に記録した子孫のうち、まだ同一と照合できるものを止めて報告する。
-        let survivors: Vec<u32> = live
-            .descendants
-            .iter()
-            .filter(|identity| process::signal_if_same(identity, libc::SIGKILL))
-            .map(|identity| identity.pid)
-            .collect();
+        // T26: TaskRunnerが停止時に記録し、終了後も残っていたため止めた子孫を報告する。
         let survivor_notice = (!survivors.is_empty()).then(|| {
             format!(
                 "[{}] killed {} descendant process(es) left outside the process group: {:?}",
@@ -1748,7 +1680,7 @@ fn observation_text(observation: AgentObservation) -> &'static str {
 }
 
 fn slot_pid(slot: &Slot) -> u32 {
-    slot.live.as_ref().map_or(0, |live| live.handle.pid())
+    slot.live.as_ref().map_or(0, |live| live.pid)
 }
 
 fn sleep_unless(cancel: &AtomicBool, duration: Duration) {
