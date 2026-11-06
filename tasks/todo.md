@@ -508,3 +508,18 @@ Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と
 - 利用者のshellへ文字列を送ってpaneのコマンドを再実行する方法は採らず、pane側のコマンドが終了しない形にした。既にresume前に終了したpaneには影響しない。
 - `cargo test --locked`(単体252件、統合9＋3＋7件)、clippy、fmtが成功。
 - macOS用の処理は`src/runtime/process_macos.rs`へ分け、`std`と`libc`だけに依存させた。このファイルとCoordinatorの`getpeereid`呼び出しを、検査用クレートでx86_64・aarch64のdarwin向けに`clippy -D warnings`で検査した。クレート全体はmacOS SDKがないためSQLiteのC部分を組み立てられず、darwin向けに検査していない。
+
+## ADR-0002の採用とログの総容量
+
+利用者の判断：おすすめの方法(TaskRunnerの別プロセス化)で実装し、完了まで細かくコミットしながら進める。
+
+- [x] ADR-0002を採用し、具体化を記録
+- [x] TaskRunnerのプロトコルと本体(`src/runtime/runner.rs`)
+- [x] エンジンをTaskRunner経由の起動へ置き換え(単体試験はスレッド、Coordinatorは別プロセス)
+- [x] Coordinator再起動後の結果の取り込み(T15を実プロセスの統合試験で確認)
+- [x] `logs.maxTotalBytes`
+- [x] 文書同期
+
+### レビュー
+
+- グループ外へ移った子孫が出力のパイプを開いたままだと、TaskRunnerがログの取り込みの終了を待ち続けて結果の報告が遅れた。子プロセスの終了後に残存分を先に止め、取り込みの終了は最大2秒だけ待つように直した。

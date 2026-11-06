@@ -33,7 +33,7 @@ SQLiteを状態ストアの案とし、Coordinatorの単一書き込み経路で
 
 秘密値をDBへ保存しない。診断情報にも環境変数全体やコピーしたファイル内容を含めない。
 
-TaskRunnerはDBへ直接書かず、Attempt用の結果ファイルを一時ファイルからの置換で確定する。Coordinatorが取り込む。現在の実装ではTaskRunnerをCoordinator内のスレッドとして動かしており、Coordinatorが異常終了すると結果ファイルを書けない。再起動したCoordinatorは未完了のRunを照合し、記録と一致するプロセスが稼働中なら再起動も停止もせず`unknown`とし、結果ファイルがあればその結果を、どちらもなければ`unknown`を記録する。Runは`phase=stopped, outcome=unknown`となる。結果取り込みを繰り返しても同じAttemptの結果を重複適用しない。
+TaskRunnerはDBへ直接書かず、Attempt用の結果ファイルを一時ファイルからの置換で確定する。Coordinatorが取り込む。TaskRunnerはAttemptごとの別プロセス(`herdr-workflow runner`、独立したプロセスグループ)であり、Coordinatorが異常終了しても子プロセスを止めずに結果ファイルを確定する([ADR-0002](../decisions/0002-coordinator-runner.md))。再起動したCoordinatorは未完了のRunを照合し、記録と一致するプロセスが稼働中なら再起動も停止もせず`unknown`とし、結果ファイルがあればその結果を、どちらもなければ`unknown`を記録する。Runは`phase=stopped, outcome=unknown`となる。その後もCoordinatorは1秒ごとに、`unknown`のTaskの結果ファイルを確かめ、確定していれば取り込んでTaskとRunの結果を更新する。結果取り込みを繰り返しても同じAttemptの結果を重複適用しない。
 
 スキーマ版を`PRAGMA user_version`で持ち、更新前に`state.v<旧版>.bak`へバックアップを作成する。現在の版は4である(版2で`approvals`と`acceptances`、版3で`runs.owned_workspace`、版4で`runs.herdr_state`を追加)。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
 
@@ -63,7 +63,16 @@ LinuxとmacOSで同じ規則を使う。Windowsネイティブの規則は段階
     result.json           終了結果(一時ファイルからの置換で確定)
     stdout.log
     stderr.log
+    runner.log            TaskRunner自身の診断出力
 ```
+
+<a id="runner-protocol"></a>
+
+### TaskRunnerとの通信
+
+CoordinatorはTaskRunnerの標準入出力でJSON Linesをやり取りする。標準入力の1行目は起動要求(Run・Task・Attempt、コマンド、作業ディレクトリ、秘密値を解決済みの環境変数、マスク対象、ログの上限)で、ファイルへは書かない。以後の行は指示(`signal`: `TERM`・`KILL`、`lines`: readiness用のログ行報告の切り替え)である。標準出力へは報告(`started`、`launchFailed`、`line`、`streamClosed`、`exited`)を書く。`exited`は`result.json`を確定した後に送る。
+
+停止信号はTaskRunnerが子プロセスの回収前に限ってグループへ送る。標準入力が閉じても子プロセスは止めず、標準出力へ書けなくなっても処理を続ける。子プロセスの終了後、ログの取り込みの終了は最大2秒だけ待って結果を報告し、残りの出力はパイプが閉じるまで取り込み続ける。
 
 ディレクトリは`0700`、ファイルとソケットは`0600`で作成する。既存のディレクトリが他の利用者の所有、またはグループ・その他に書き込み権限を持つ場合は、権限を変更せずエラーにする。Herdrの`plugin uninstall`ではこのディレクトリは削除されない。
 

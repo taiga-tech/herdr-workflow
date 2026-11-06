@@ -49,7 +49,7 @@ Coordinatorは受付キュー、実行計画、依存判定、所有権、停止
 
 ### TaskRunner
 
-現在の実装では、Attemptごとの監視(子プロセスの終了待ち、出力の取り込み、`launch.json`・`result.json`の書き込み)をCoordinator内のスレッドで行い、別プロセスのTaskRunnerは起動しない。以下は[ADR-0002](decisions/0002-coordinator-runner.md)で提案中の構成である。
+[ADR-0002](decisions/0002-coordinator-runner.md)により、CoordinatorはAttemptごとに`herdr-workflow runner`を別のプロセスグループで起動する。通信は[状態ストア](specs/persistence.md#runner-protocol)を参照する。
 
 コマンドごとに独立したTaskRunnerを起動し、そのTaskRunnerが実際の子プロセスを監視する。Coordinatorの再起動と子プロセスの終了判定を分けるためである。
 

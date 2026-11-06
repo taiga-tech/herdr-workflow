@@ -63,6 +63,8 @@ herdr-workflow/
 │   ├── runtime/
 │   │   ├── state_dir.rs            状態ディレクトリの決定と権限確認
 │   │   ├── process.rs              プロセスグループでの起動・識別・停止
+│   │   ├── process_macos.rs        macOSのプロセス情報(proc_pidinfo、kern.boottime)
+│   │   ├── runner.rs               TaskRunner(Attemptごとの別プロセス)と通信
 │   │   ├── logs.rs                 Attemptログ(JSON Lines、世代、マスク)
 │   │   ├── readiness.rs            HTTP・TCPの確認
 │   │   ├── locks.rs                resource lockとcheckout実行ロック

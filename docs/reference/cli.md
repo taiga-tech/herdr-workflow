@@ -40,6 +40,7 @@ updated: '2026-09-17'
 | `doctor`                 | Herdr API、Git、mise、パス、通信、権限を検査する            |
 | `hook`                   | Herdrの`[[events]]`から呼ばれ、worktreeイベントを受け付ける |
 | `coordinator`            | Coordinatorを前面で起動する(通常はCLIが自動起動する)        |
+| `runner`                 | CoordinatorがAttemptごとに起動するTaskRunner(直接使わない)  |
 
 <a id="implemented"></a>
 
