@@ -58,7 +58,7 @@ Gitの情報はCLIから取得し、`.git`ファイルや管理ディレクト�
 
 Gitの`post-checkout`はworktree作成以外でも実行される。`.git`がファイルかどうかだけでは「作成時に一度だけ」を判定できない。[S10](../reference/sources.md#s10) 本プラグインでは、イベント受付とRunの記録で初回適用を判定する。
 
-Git側で有効なhookやフィルターもコマンド実行につながるため、worktree作成前の承認でその存在を確認対象に含める。Gitの通常動作を秘密裏に無効化しない。
+Git側で有効なhookやフィルターもコマンド実行につながるため、worktree作成前の承認でその存在を確認対象に含める。`trust`は、`git rev-parse --git-path hooks`が指すディレクトリの実行可能なhook(`.sample`を除く)と、`git config`のclean・smudge・processフィルター(利用者全体の設定を含む)を承認内容に表示する。Gitの通常動作を秘密裏に無効化しない。
 
 ## 関連文書
 

@@ -932,7 +932,12 @@ fn trust_main(state: &StateDir, args: &Args) -> i32 {
     }
     let hash = crate::approval::config_hash(&text, &plugin_config);
     let repo = crate::approval::repo_key(config.parent().unwrap_or(Path::new(".")));
-    let summary = crate::approval::summary(&spec);
+    let mut summary = crate::approval::summary(&spec);
+    // Gitのhookやフィルターもworktreeの作成・checkoutでコマンドを実行しうる。
+    for item in crate::approval::git_side_effects(config.parent().unwrap_or(Path::new("."))) {
+        summary.push_str(&item);
+        summary.push('\n');
+    }
     let store = match Store::open(&state.db_path()) {
         Ok(store) => store,
         Err(error) => {

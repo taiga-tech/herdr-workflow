@@ -104,6 +104,52 @@ pub fn summary(spec: &WorkflowSpec) -> String {
     out
 }
 
+/// 有効なGitのhook(実行可能で`.sample`でないもの)と、clean・smudge等のフィルター。
+/// worktreeの作成やcheckoutでもコマンド実行につながるため、承認時に表示する。
+#[must_use]
+pub fn git_side_effects(repo: &Path) -> Vec<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut found = Vec::new();
+    if let Ok(Some(hooks)) = git::git(repo, &["rev-parse", "--git-path", "hooks"]) {
+        let hooks = hooks.trim();
+        let dir = if Path::new(hooks).is_absolute() {
+            PathBuf::from(hooks)
+        } else {
+            repo.join(hooks)
+        };
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            let mut names: Vec<String> = entries
+                .flatten()
+                .filter(|entry| {
+                    entry.metadata().is_ok_and(|metadata| {
+                        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+                    })
+                })
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .filter(|name| !name.ends_with(".sample"))
+                .collect();
+            names.sort();
+            found.extend(names.into_iter().map(|name| format!("git hook: {name}")));
+        }
+    }
+    if let Ok(Some(filters)) = git::git(
+        repo,
+        &[
+            "config",
+            "--get-regexp",
+            r"^filter\..*\.(clean|smudge|process)$",
+        ],
+    ) {
+        found.extend(
+            filters
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| format!("git filter: {line}")),
+        );
+    }
+    found
+}
+
 /// Herdrが渡すイベントから取り出したworktree情報。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeEvent {
@@ -187,6 +233,37 @@ mod tests {
         let plugin = PluginConfig::default();
         assert_ne!(config_hash("a", &plugin), config_hash("b", &plugin));
         assert_eq!(config_hash("a", &plugin), config_hash("a", &plugin));
+    }
+
+    #[test]
+    fn git_hooks_and_filters_are_listed() {
+        use crate::runtime::git::test_repo::{init, run};
+        use crate::runtime::state_dir::test_support::TempDir;
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new("approval");
+        let repo = init(&tmp.0.join("repo"));
+        // 利用者全体の設定(例: git-lfs)のフィルターも対象になるため、差分で確かめる。
+        let before = git_side_effects(&repo);
+        assert!(!before.iter().any(|item| item.starts_with("git hook:")));
+        let hook = repo.join(".git/hooks/post-checkout");
+        std::fs::write(&hook, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        run(
+            &repo,
+            &["config", "filter.custom.smudge", "custom-smudge %f"],
+        );
+        let after = git_side_effects(&repo);
+        assert!(
+            after.contains(&"git hook: post-checkout".to_string()),
+            "{after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|item| item == "git filter: filter.custom.smudge custom-smudge %f"),
+            "{after:?}"
+        );
+        assert_eq!(after.len(), before.len() + 2);
     }
 
     #[test]
