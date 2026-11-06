@@ -385,3 +385,80 @@ fn logs_follow_spans_retried_attempts_and_keep_waits_for_more() {
     keep.kill().unwrap();
     keep.wait().unwrap();
 }
+
+#[test]
+fn coordinator_restart_keeps_running_task_and_imports_its_result() {
+    // T15: Coordinatorが異常終了しても、TaskRunnerは子プロセスを止めずに結果を確定する。
+    // 再起動したCoordinatorは稼働中のjobを重複起動せず、確定した結果を取り込む。
+    let env = Env::new();
+    let config = env.write_workflow(
+        &job(
+            "slow",
+            "echo run >> count; sleep 2; echo done > finished",
+            "",
+        ),
+        "",
+    );
+    let up = env.cli(&["up", "--config", path(&config)]);
+    assert_eq!(up.status.code(), Some(0), "{up:?}");
+    let run_id = String::from_utf8_lossy(&up.stdout).trim().to_string();
+    let status = |env: &Env| -> serde_json::Value {
+        serde_json::from_slice(&env.cli(&["status", &run_id, "--json"]).stdout).unwrap()
+    };
+    for _ in 0..100 {
+        if status(&env)["tasks"]["slow"]["runtime"]["state"] == "running" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let doctor: serde_json::Value =
+        serde_json::from_slice(&env.cli(&["doctor", "--json"]).stdout).unwrap();
+    let detail = doctor["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["name"] == "coordinator")
+        .unwrap()["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let pid: i32 = detail
+        .trim_end_matches(')')
+        .rsplit(' ')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    // SAFETY: この試験が起動したCoordinatorを強制終了する。
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
+
+    let mut coordinator = Command::new(env!("CARGO_BIN_EXE_herdr-workflow"))
+        .args(["coordinator", "--idle-exit", "10"])
+        .env("HERDR_WORKFLOW_STATE_DIR", &env.state)
+        .env("HERDR_WORKFLOW_BIN", env!("CARGO_BIN_EXE_herdr-workflow"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut imported = serde_json::Value::Null;
+    for _ in 0..200 {
+        imported = status(&env);
+        if imported["tasks"]["slow"]["runtime"]["state"] == "succeeded" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(
+        imported["tasks"]["slow"]["runtime"]["state"], "succeeded",
+        "{imported}"
+    );
+    assert_eq!(imported["run"]["outcome"], "succeeded");
+    assert!(env.root.join("work/finished").exists());
+    // 再起動で同じjobを二度起動していない。
+    assert_eq!(
+        std::fs::read_to_string(env.root.join("work/count")).unwrap(),
+        "run\n"
+    );
+    coordinator.kill().unwrap();
+    coordinator.wait().unwrap();
+}

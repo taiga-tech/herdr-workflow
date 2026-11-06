@@ -33,6 +33,8 @@ use crate::state::models::{AttemptOutcome, ReadinessState, TaskState};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
+/// 状態不明のTaskの結果を取り込む間隔。
+const IMPORT_INTERVAL: Duration = Duration::from_secs(1);
 const COORDINATOR_LOCK: &str = "coordinator";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1142,18 +1144,14 @@ pub fn reconcile_orphans(state: &StateDir, store: &mut Store) -> Result<usize, C
             let outcome = match (identity, &result) {
                 (Some(IdentityMatch::Same), _) => {
                     task.detail = Some(format!(
-                        "process {} is still running without a coordinator; not restarted",
+                        "process {} is still running under its task runner; not restarted (the result is imported when it finishes)",
                         launch.as_ref().map_or(0, |launch| launch.child.pid)
                     ));
                     AttemptOutcome::Unknown
                 }
                 (_, Some(result)) => {
                     task.detail = Some("result imported after coordinator restart".to_string());
-                    match (&result.exit_code, &result.signal) {
-                        (Some(code), _) => AttemptOutcome::ExitCode(*code),
-                        (None, Some(signal)) => AttemptOutcome::Signaled(signal.clone()),
-                        (None, None) => AttemptOutcome::Unknown,
-                    }
+                    outcome_from_result(result)
                 }
                 _ => {
                     task.detail = Some("no result recorded; outcome unknown".to_string());
@@ -1190,6 +1188,97 @@ pub fn reconcile_orphans(state: &StateDir, store: &mut Store) -> Result<usize, C
         );
     }
     Ok(count)
+}
+
+fn outcome_from_result(result: &engine::ResultFile) -> AttemptOutcome {
+    match (&result.exit_code, &result.signal) {
+        (Some(code), _) => AttemptOutcome::ExitCode(*code),
+        (None, Some(signal)) => AttemptOutcome::Signaled(signal.clone()),
+        (None, None) => AttemptOutcome::Unknown,
+    }
+}
+
+/// Coordinatorの再起動で状態不明として残したTaskのうち、TaskRunnerが後から
+/// `result.json`を確定したものの結果を取り込む(T15)。再実行はしない。
+/// 取り込んだTaskの数を返す。
+pub fn import_finished_results(
+    state: &StateDir,
+    store: &mut Store,
+) -> Result<usize, CoordinatorError> {
+    let mut imported = 0;
+    for run in store.recent_runs(1000).map_err(io_err)? {
+        if !matches!(run.phase, RunPhase::Stopped | RunPhase::Finished)
+            || run.outcome != RunOutcome::Unknown
+        {
+            continue;
+        }
+        let mut tasks = store.tasks(&run.run_id).map_err(io_err)?;
+        let mut messages = Vec::new();
+        for (id, task) in &mut tasks {
+            if task.runtime.state != TaskState::Unknown || task.kind == engine::TaskKind::Agent {
+                continue;
+            }
+            let Some(last) = task.runtime.attempts.last().cloned() else {
+                continue;
+            };
+            let dir = state.attempt_dir(&run.run_id, &id.0, last.attempt_id.0);
+            let Some(result) = std::fs::read(dir.join("result.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<engine::ResultFile>(&bytes).ok())
+            else {
+                continue;
+            };
+            let outcome = outcome_from_result(&result);
+            if outcome == AttemptOutcome::Unknown {
+                continue;
+            }
+            // 記録上は確定済み(Unknown)のAttemptを、確定した結果で置き換える。
+            if let Some(entry) = task
+                .runtime
+                .attempts
+                .iter_mut()
+                .find(|attempt| attempt.attempt_id == last.attempt_id)
+            {
+                entry.outcome = outcome.clone();
+            }
+            task.runtime.state = match (task.kind, &outcome) {
+                (engine::TaskKind::Job, AttemptOutcome::ExitCode(0)) => TaskState::Succeeded,
+                _ => TaskState::Failed,
+            };
+            task.detail =
+                Some("result imported from the task runner after coordinator restart".to_string());
+            messages.push(format!("[{}] result imported: {outcome:?}", id.0));
+            imported += 1;
+        }
+        if messages.is_empty() {
+            continue;
+        }
+        let states: Vec<TaskState> = tasks.values().map(|task| task.runtime.state).collect();
+        let outcome = if states.contains(&TaskState::Unknown) {
+            RunOutcome::Unknown
+        } else if states
+            .iter()
+            .any(|state| matches!(state, TaskState::Failed | TaskState::Skipped))
+        {
+            RunOutcome::Failed
+        } else {
+            RunOutcome::Succeeded
+        };
+        store
+            .save_snapshot(&engine::RunSnapshot {
+                run_id: run.run_id.clone(),
+                phase: run.phase,
+                outcome,
+                target: run.target.clone().map(TaskId),
+                tasks,
+                updated_at: logs::rfc3339(SystemTime::now()),
+            })
+            .map_err(io_err)?;
+        for message in messages {
+            let _ = store.add_event(&run.run_id, &message);
+        }
+    }
+    Ok(imported)
 }
 
 /// 保持日数を過ぎた、終了・停止済みRunのAttemptファイル(ログ、起動証跡、結果)を削除する。
@@ -1258,6 +1347,7 @@ pub fn serve(state: &StateDir, idle_exit: Duration) -> Result<(), CoordinatorErr
     {
         let mut store = Store::open(&state.db_path()).map_err(io_err)?;
         reconcile_orphans(state, &mut store)?;
+        import_finished_results(state, &mut store)?;
         // 保持日数はCoordinatorの起動元のプラグイン全体設定から読む。
         if let Some(days) = crate::config::plugin::load_from_env()
             .ok()
@@ -1282,7 +1372,14 @@ pub fn serve(state: &StateDir, idle_exit: Duration) -> Result<(), CoordinatorErr
         last_activity: Mutex::new(Instant::now()),
         shutdown: AtomicBool::new(false),
     });
+    // 状態不明のTaskの結果を、TaskRunnerが確定し次第取り込む(T15)。
+    let mut import_store = Store::open(&state.db_path()).map_err(io_err)?;
+    let mut next_import = Instant::now() + IMPORT_INTERVAL;
     loop {
+        if Instant::now() >= next_import {
+            next_import = Instant::now() + IMPORT_INTERVAL;
+            let _ = import_finished_results(state, &mut import_store);
+        }
         match listener.accept() {
             Ok((stream, _)) => {
                 let shared = Arc::clone(&shared);
