@@ -87,6 +87,9 @@ pub struct RunConfig {
     /// Agentの観測値を照会する関数と、その間隔。
     pub observe_agent: Option<AgentObserver>,
     pub agent_poll: Duration,
+    /// Attemptログ1ファイルの上限と世代数(プラグイン全体設定の`logs`)。
+    pub log_max_bytes: u64,
+    pub log_generations: u32,
 }
 
 /// 画面構築の結果。Agentごとの扱いを返す。
@@ -1072,13 +1075,13 @@ impl<'r> Engine<'r> {
         let writers = (
             LogWriter::create(
                 attempt_dir.join(Stream::Stdout.file_name()),
-                logs::DEFAULT_MAX_BYTES,
-                logs::DEFAULT_GENERATIONS,
+                self.config.log_max_bytes,
+                self.config.log_generations,
             ),
             LogWriter::create(
                 attempt_dir.join(Stream::Stderr.file_name()),
-                logs::DEFAULT_MAX_BYTES,
-                logs::DEFAULT_GENERATIONS,
+                self.config.log_max_bytes,
+                self.config.log_generations,
             ),
         );
         let (stdout_writer, stderr_writer) = match writers {

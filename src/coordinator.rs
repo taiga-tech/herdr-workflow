@@ -364,9 +364,9 @@ fn layout_hook(
                     };
                     let command = match &pane.view {
                         PaneView::Logs { task } => {
-                            follow(&["logs", &run_id, "--task", &task.0, "--follow"])
+                            follow(&["logs", &run_id, "--task", &task.0, "--follow", "--keep"])
                         }
-                        PaneView::Status => follow(&["status", &run_id, "--watch"]),
+                        PaneView::Status => follow(&["status", &run_id, "--watch", "--keep"]),
                         PaneView::Agent { task } => {
                             agent_panes.push((pane.id.clone(), task.clone()));
                             None
@@ -1189,6 +1189,40 @@ pub fn reconcile_orphans(state: &StateDir, store: &mut Store) -> Result<usize, C
     Ok(count)
 }
 
+/// 保持日数を過ぎた、終了・停止済みRunのAttemptファイル(ログ、起動証跡、結果)を削除する。
+/// 状態ストアのRunとTaskの記録は残す。稼働中・状態不明のRunは対象にしない。
+pub fn prune_logs(
+    state: &StateDir,
+    store: &Store,
+    retention_days: u32,
+    now: SystemTime,
+) -> Result<Vec<String>, CoordinatorError> {
+    let cutoff = now
+        .checked_sub(Duration::from_secs(u64::from(retention_days) * 86_400))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let cutoff = logs::rfc3339(cutoff);
+    let mut removed = Vec::new();
+    for run in store.recent_runs(u32::MAX).map_err(io_err)? {
+        if !matches!(run.phase, RunPhase::Stopped | RunPhase::Finished)
+            || run.outcome == RunOutcome::Unknown
+            || run.updated_at >= cutoff
+        {
+            continue;
+        }
+        let dir = state.run_dir(&run.run_id);
+        if !dir.exists() {
+            continue;
+        }
+        std::fs::remove_dir_all(&dir).map_err(io_err)?;
+        let _ = store.add_event(
+            &run.run_id,
+            &format!("logs removed after {retention_days} day(s) of retention"),
+        );
+        removed.push(run.run_id);
+    }
+    Ok(removed)
+}
+
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_terminate(_: libc::c_int) {
@@ -1221,6 +1255,13 @@ pub fn serve(state: &StateDir, idle_exit: Duration) -> Result<(), CoordinatorErr
     {
         let mut store = Store::open(&state.db_path()).map_err(io_err)?;
         reconcile_orphans(state, &mut store)?;
+        // 保持日数はCoordinatorの起動元のプラグイン全体設定から読む。
+        if let Some(days) = crate::config::plugin::load_from_env()
+            .ok()
+            .and_then(|config| config.log_retention_days())
+        {
+            prune_logs(state, &store, days, SystemTime::now())?;
+        }
     }
     // ロックを保持しているので、残っているソケットは前回の残骸。
     let _ = std::fs::remove_file(&socket);
@@ -1659,6 +1700,87 @@ mod tests {
         assert!(agent.detail.unwrap().contains("no longer exists"));
         assert_eq!(store.run(&run_id).unwrap().outcome, RunOutcome::Failed);
         let _ = std::fs::remove_file(socket);
+    }
+
+    #[test]
+    fn retention_removes_only_old_finished_run_files() {
+        use crate::runtime::state_dir::test_support::TempDir;
+        let tmp = TempDir::new("coord-prune");
+        let state = StateDir::open(tmp.0.join("state")).unwrap();
+        let mut store = Store::open(&state.db_path()).unwrap();
+        let record = |id: &str| RunRecord {
+            run_id: id.to_string(),
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            plan_hash: String::new(),
+            config_path: PathBuf::from("/c"),
+            checkout: PathBuf::from("/w"),
+            target: None,
+            phase: RunPhase::Queued,
+            outcome: RunOutcome::Pending,
+            workflow: String::new(),
+            inputs: Vec::new(),
+            coordinator_pid: None,
+            plugin_config: String::new(),
+            owned_workspace: None,
+            herdr_state: None,
+        };
+        let finish = |store: &mut Store, id: &str, phase, outcome, at: &str| {
+            store
+                .save_snapshot(&engine::RunSnapshot {
+                    run_id: id.to_string(),
+                    phase,
+                    outcome,
+                    target: None,
+                    tasks: BTreeMap::new(),
+                    updated_at: at.to_string(),
+                })
+                .unwrap();
+        };
+        for id in ["old", "recent", "active", "unknown"] {
+            store.insert_run(&record(id)).unwrap();
+            let dir = state.attempt_dir(id, "t", 1);
+            state.ensure_subdir(&dir).unwrap();
+            std::fs::write(dir.join("stdout.log"), "x").unwrap();
+        }
+        finish(
+            &mut store,
+            "old",
+            RunPhase::Finished,
+            RunOutcome::Succeeded,
+            "2026-01-01T00:00:00.000Z",
+        );
+        finish(
+            &mut store,
+            "recent",
+            RunPhase::Finished,
+            RunOutcome::Failed,
+            "2026-03-09T00:00:00.000Z",
+        );
+        finish(
+            &mut store,
+            "active",
+            RunPhase::Active,
+            RunOutcome::Pending,
+            "2026-01-01T00:00:00.000Z",
+        );
+        finish(
+            &mut store,
+            "unknown",
+            RunPhase::Stopped,
+            RunOutcome::Unknown,
+            "2026-01-01T00:00:00.000Z",
+        );
+        // 2026-03-10から7日前より古いものだけが対象。
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_773_100_800);
+        let removed = prune_logs(&state, &store, 7, now).unwrap();
+        assert_eq!(removed, ["old"]);
+        assert!(!state.run_dir("old").exists());
+        for id in ["recent", "active", "unknown"] {
+            assert!(state.run_dir(id).exists(), "{id}");
+        }
+        // Runの記録は残る。
+        assert_eq!(store.run("old").unwrap().outcome, RunOutcome::Succeeded);
     }
 
     #[test]

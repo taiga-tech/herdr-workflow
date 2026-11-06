@@ -68,6 +68,8 @@ struct Args {
     follow: bool,
     herdr: bool,
     watch: bool,
+    /// `--follow`・`--watch`をRunの終了後も続ける(resumeを待つpane用)。
+    keep: bool,
     idle_exit: Option<u64>,
 }
 
@@ -119,6 +121,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--follow" | "-f" => parsed.follow = true,
             "--herdr" => parsed.herdr = true,
             "--watch" => parsed.watch = true,
+            "--keep" => parsed.keep = true,
             other if other.starts_with("--") => return Err(format!("unknown flag {other:?}")),
             other => parsed.positional.push(other.to_string()),
         }
@@ -603,7 +606,7 @@ fn status_main(state: &StateDir, args: &Args) -> i32 {
                 print!("{}", render_status(&run, &tasks));
             }
             let _ = std::io::stdout().flush();
-            if !args.watch || is_done(run.phase) {
+            if !args.watch || (is_done(run.phase) && !args.keep) {
                 return EXIT_OK;
             }
             std::thread::sleep(Duration::from_secs(1));
@@ -656,7 +659,7 @@ fn logs_main(state: &StateDir, args: &Args) -> i32 {
         eprint_error(
             args.json,
             "cli",
-            "usage: logs RUN --task TASK [--attempt N] [--follow]",
+            "usage: logs RUN --task TASK [--attempt N] [--follow [--keep]]",
         );
         return EXIT_CONFIG;
     };
@@ -676,7 +679,9 @@ fn logs_main(state: &StateDir, args: &Args) -> i32 {
             return EXIT_CONFIG;
         }
     };
-    let mut printed: BTreeMap<Stream, u64> = BTreeMap::new();
+    // (Attempt, stream)ごとに表示済みの連番を覚え、新しいAttemptへ移っても重複させない。
+    let mut printed: BTreeMap<(u32, Stream), u64> = BTreeMap::new();
+    let mut shown_header: Option<u32> = None;
     loop {
         let tasks = store.tasks(run_id).unwrap_or_default();
         let Some(snapshot) = tasks.get(&TaskId(task.clone())) else {
@@ -687,56 +692,94 @@ fn logs_main(state: &StateDir, args: &Args) -> i32 {
             );
             return EXIT_FAILED;
         };
-        let Some(attempt) = args.attempt.or_else(|| {
-            snapshot
+        let attempts: Vec<u32> = match args.attempt {
+            Some(attempt) => vec![attempt],
+            None if args.follow => snapshot
+                .runtime
+                .attempts
+                .iter()
+                .map(|attempt| attempt.attempt_id.0)
+                .filter(|attempt| shown_header.is_none_or(|shown| *attempt >= shown))
+                .collect(),
+            None => snapshot
                 .runtime
                 .attempts
                 .last()
                 .map(|attempt| attempt.attempt_id.0)
-        }) else {
-            if !args.follow {
-                return EXIT_OK;
-            }
-            std::thread::sleep(Duration::from_millis(200));
-            continue;
+                .into_iter()
+                .collect(),
         };
-        let dir = state.attempt_dir(run_id, task, attempt);
-        let mut records = Vec::new();
-        for stream in &streams {
-            let path = dir.join(stream.file_name());
-            if let Ok(found) = logs::read_records(&path, logs::DEFAULT_GENERATIONS) {
-                let seen = printed.get(stream).copied().unwrap_or(0);
-                let new: Vec<_> = found
-                    .into_iter()
-                    .filter(|record| record.seq > seen)
-                    .collect();
-                if let Some(last) = new.last() {
-                    printed.insert(*stream, last.seq);
+        for attempt in attempts {
+            let dir = state.attempt_dir(run_id, task, attempt);
+            let mut records = Vec::new();
+            for stream in &streams {
+                let path = dir.join(stream.file_name());
+                if let Ok(found) = logs::read_records(&path, logs::MAX_GENERATIONS) {
+                    let seen = printed.get(&(attempt, *stream)).copied().unwrap_or(0);
+                    let new: Vec<_> = found
+                        .into_iter()
+                        .filter(|record| record.seq > seen)
+                        .collect();
+                    if let Some(last) = new.last() {
+                        printed.insert((attempt, *stream), last.seq);
+                    }
+                    records.extend(new);
                 }
-                records.extend(new);
             }
-        }
-        records.sort_by(|a, b| a.time.cmp(&b.time));
-        for record in &records {
-            if args.json {
-                println!("{}", serde_json::to_string(record).unwrap_or_default());
-            } else {
-                println!("{}", logs::display_text(&record.data));
+            // 追従中に新しいAttemptへ移ったら、区切りを表示する。
+            if args.follow
+                && args.attempt.is_none()
+                && !args.json
+                && shown_header.is_some_and(|shown| shown < attempt)
+            {
+                println!("--- {task} attempt {attempt} ---");
+            }
+            if shown_header.is_none_or(|shown| shown < attempt) {
+                shown_header = Some(attempt);
+            }
+            records.sort_by(|a, b| a.time.cmp(&b.time));
+            for record in &records {
+                if args.json {
+                    println!("{}", serde_json::to_string(record).unwrap_or_default());
+                } else {
+                    println!("{}", logs::display_text(&record.data));
+                }
             }
         }
         let _ = std::io::stdout().flush();
         if !args.follow {
             return EXIT_OK;
         }
-        let finished_attempt = snapshot
-            .runtime
-            .attempts
-            .iter()
-            .find(|candidate| candidate.attempt_id.0 == attempt)
-            .is_some_and(|candidate| candidate.outcome != AttemptOutcome::Pending);
-        let run_done = store.run(run_id).is_ok_and(|run| is_done(run.phase));
-        if finished_attempt || run_done {
-            return EXIT_OK;
+        if !args.keep {
+            let attempt_done = |attempt: u32| {
+                snapshot
+                    .runtime
+                    .attempts
+                    .iter()
+                    .find(|candidate| candidate.attempt_id.0 == attempt)
+                    .is_some_and(|candidate| candidate.outcome != AttemptOutcome::Pending)
+            };
+            let finished = match args.attempt {
+                Some(attempt) => attempt_done(attempt),
+                // 自動再試行を待つ間(waiting)は終えず、Taskの結果が確定してから終える。
+                None => {
+                    !matches!(
+                        snapshot.runtime.state,
+                        TaskState::Waiting
+                            | TaskState::Starting
+                            | TaskState::Running
+                            | TaskState::Stopping
+                    ) && snapshot
+                        .runtime
+                        .attempts
+                        .last()
+                        .is_none_or(|last| attempt_done(last.attempt_id.0))
+                }
+            };
+            let run_done = store.run(run_id).is_ok_and(|run| is_done(run.phase));
+            if finished || run_done {
+                return EXIT_OK;
+            }
         }
         std::thread::sleep(Duration::from_millis(200));
     }

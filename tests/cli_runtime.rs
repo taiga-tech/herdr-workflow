@@ -341,3 +341,47 @@ fn remove_never_deletes_a_borrowed_checkout() {
     assert_eq!(remove.status.code(), Some(4), "{remove:?}");
     assert!(env.root.join("work/untracked.txt").exists());
 }
+
+#[test]
+fn logs_follow_spans_retried_attempts_and_keep_waits_for_more() {
+    let env = Env::new();
+    let config = env.write_workflow(
+        &job(
+            "flaky",
+            "if [ -f once ]; then echo second; exit 0; fi; touch once; echo first; exit 1",
+            "    retry:\n      maxAttempts: 2\n",
+        ),
+        "",
+    );
+    let run = env.cli(&[
+        "run",
+        "--config",
+        path(&config),
+        "--target",
+        "flaky",
+        "--json",
+    ]);
+    assert_eq!(run.status.code(), Some(0), "{run:?}");
+    let report: serde_json::Value = serde_json::from_slice(&run.stdout).unwrap();
+    let run_id = report["run"]["runId"].as_str().unwrap().to_string();
+
+    // 追従はTaskの結果が確定するまで続き、Attemptの区切りを表示して終える。
+    let follow = env.cli(&["logs", &run_id, "--task", "flaky", "--follow"]);
+    assert_eq!(follow.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&follow.stdout),
+        "first\n--- flaky attempt 2 ---\nsecond\n"
+    );
+
+    // `--keep`はRunの終了後もresumeを待って続く(paneで使う)。
+    let mut keep = Command::new(env!("CARGO_BIN_EXE_herdr-workflow"))
+        .args(["logs", &run_id, "--task", "flaky", "--follow", "--keep"])
+        .env("HERDR_WORKFLOW_STATE_DIR", &env.state)
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    assert!(keep.try_wait().unwrap().is_none(), "--keep must not exit");
+    keep.kill().unwrap();
+    keep.wait().unwrap();
+}

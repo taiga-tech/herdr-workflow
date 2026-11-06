@@ -253,6 +253,8 @@ pub fn prepare_run(request: RunRequest<'_>, run_id: String) -> Result<PreparedRu
         agents: BTreeMap::new(),
         observe_agent: None,
         agent_poll: std::time::Duration::from_secs(2),
+        log_max_bytes: request.plugin_config.log_max_file_bytes(),
+        log_generations: request.plugin_config.log_generations(),
     };
     Ok(PreparedRun {
         config,

@@ -13,6 +13,9 @@ pub const DEFAULT_MAX_GRID_DIMENSION: u32 = 64;
 pub const MAX_CONFIGURABLE_GRID_DIMENSION: u32 = 64;
 pub const DEFAULT_MAX_PANES_PER_TAB: u32 = 32;
 pub const MAX_CONFIGURABLE_PANES_PER_TAB: u32 = 32;
+pub const MIN_LOG_FILE_BYTES: u64 = 1024 * 1024;
+pub const MAX_LOG_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_RETENTION_DAYS: u32 = 3650;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "RawPluginConfig", rename_all = "camelCase")]
@@ -20,6 +23,8 @@ pub struct PluginConfig {
     version: u32,
     #[serde(default)]
     limits: LimitsConfig,
+    #[serde(default)]
+    logs: LogsConfig,
 }
 
 impl PluginConfig {
@@ -32,6 +37,24 @@ impl PluginConfig {
     pub fn max_panes_per_tab(&self) -> u32 {
         self.limits.layout.max_panes_per_tab
     }
+
+    /// Attemptのログ1ファイルの上限(バイト)。
+    #[must_use]
+    pub fn log_max_file_bytes(&self) -> u64 {
+        self.logs.max_file_bytes
+    }
+
+    /// ログの世代数(現在のファイルを含む)。
+    #[must_use]
+    pub fn log_generations(&self) -> u32 {
+        self.logs.generations
+    }
+
+    /// 終了したRunのログを残す日数。`None`は削除しない。
+    #[must_use]
+    pub fn log_retention_days(&self) -> Option<u32> {
+        self.logs.retention_days
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +63,8 @@ struct RawPluginConfig {
     version: u32,
     #[serde(default)]
     limits: LimitsConfig,
+    #[serde(default)]
+    logs: LogsConfig,
 }
 
 impl TryFrom<RawPluginConfig> for PluginConfig {
@@ -63,9 +88,30 @@ impl TryFrom<RawPluginConfig> for PluginConfig {
                 max: MAX_CONFIGURABLE_PANES_PER_TAB,
             });
         }
+        let logs = &raw.logs;
+        if !(MIN_LOG_FILE_BYTES..=MAX_LOG_FILE_BYTES).contains(&logs.max_file_bytes) {
+            return Err(PluginConfigError::InvalidLogFileBytes {
+                value: logs.max_file_bytes,
+            });
+        }
+        if !(1..=crate::runtime::logs::MAX_GENERATIONS).contains(&logs.generations) {
+            return Err(PluginConfigError::InvalidLogGenerations {
+                value: logs.generations,
+                max: crate::runtime::logs::MAX_GENERATIONS,
+            });
+        }
+        if let Some(days) = logs.retention_days
+            && !(1..=MAX_RETENTION_DAYS).contains(&days)
+        {
+            return Err(PluginConfigError::InvalidRetentionDays {
+                value: days,
+                max: MAX_RETENTION_DAYS,
+            });
+        }
         Ok(Self {
             version: raw.version,
             limits: raw.limits,
+            logs: raw.logs,
         })
     }
 }
@@ -75,6 +121,27 @@ impl Default for PluginConfig {
         Self {
             version: 1,
             limits: LimitsConfig::default(),
+            logs: LogsConfig::default(),
+        }
+    }
+}
+
+/// Attemptログの大きさと保持(docs/specs/observability.md「ログ形式」)。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct LogsConfig {
+    max_file_bytes: u64,
+    generations: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retention_days: Option<u32>,
+}
+
+impl Default for LogsConfig {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: crate::runtime::logs::DEFAULT_MAX_BYTES,
+            generations: crate::runtime::logs::DEFAULT_GENERATIONS,
+            retention_days: None,
         }
     }
 }
@@ -123,6 +190,12 @@ pub enum PluginConfigError {
     InvalidMaxGridDimension { value: u32, max: u32 },
     #[error("limits.layout.maxPanesPerTab must be between 1 and {max}, got {value}")]
     InvalidMaxPanesPerTab { value: u32, max: u32 },
+    #[error("logs.maxFileBytes must be between 1 MiB and 1 GiB, got {value}")]
+    InvalidLogFileBytes { value: u64 },
+    #[error("logs.generations must be between 1 and {max}, got {value}")]
+    InvalidLogGenerations { value: u32, max: u32 },
+    #[error("logs.retentionDays must be between 1 and {max}, got {value}")]
+    InvalidRetentionDays { value: u32, max: u32 },
 }
 
 pub fn load_str(yaml: &str) -> Result<PluginConfig, PluginConfigError> {
@@ -218,6 +291,34 @@ mod tests {
     fn unsupported_version_is_rejected() {
         let err = load_str("version: 2\n").expect_err("unsupported version must fail");
         assert!(matches!(err, PluginConfigError::UnsupportedVersion(2)));
+    }
+
+    #[test]
+    fn log_settings_are_loaded_and_validated() {
+        let config = load_str(
+            "version: 1\nlogs:\n  maxFileBytes: 2097152\n  generations: 3\n  retentionDays: 14\n",
+        )
+        .unwrap();
+        assert_eq!(config.log_max_file_bytes(), 2_097_152);
+        assert_eq!(config.log_generations(), 3);
+        assert_eq!(config.log_retention_days(), Some(14));
+        let defaults = PluginConfig::default();
+        assert_eq!(defaults.log_max_file_bytes(), 20 * 1024 * 1024);
+        assert_eq!(defaults.log_generations(), 5);
+        assert_eq!(defaults.log_retention_days(), None);
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  maxFileBytes: 1000\n"),
+            Err(PluginConfigError::InvalidLogFileBytes { .. })
+        ));
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  generations: 0\n"),
+            Err(PluginConfigError::InvalidLogGenerations { .. })
+        ));
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  retentionDays: 0\n"),
+            Err(PluginConfigError::InvalidRetentionDays { .. })
+        ));
+        assert!(load_str("version: 1\nlogs:\n  unknown: 1\n").is_err());
     }
 
     #[test]

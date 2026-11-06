@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_MAX_BYTES: u64 = 20 * 1024 * 1024;
 pub const DEFAULT_GENERATIONS: u32 = 5;
+/// 設定できる世代数の上限。読み取り時はこの世代まで探す。
+pub const MAX_GENERATIONS: u32 = 20;
 const MASK: &str = "***";
 /// 1行の上限。超えた分は次のレコードへ分割する。
 const MAX_LINE_BYTES: usize = 64 * 1024;
