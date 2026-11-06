@@ -150,6 +150,35 @@ pub fn git_side_effects(repo: &Path) -> Vec<String> {
     found
 }
 
+/// `git_side_effects`の一覧の要約。承認と一緒に記録し、hook・フィルターが変わったら
+/// 同じ設定ハッシュでも自動実行しない(Q13)。
+#[must_use]
+pub fn side_effects_digest(items: &[String]) -> String {
+    let mut hasher = Sha256::new();
+    for item in items {
+        hasher.update(item.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .fold(String::from("sha256:"), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
+/// イベント経路で値を決められない入力。既定値がなく必須の入力のうち、
+/// イベントのブランチ名から渡す`branch`を除いたもの(Q13)。
+#[must_use]
+pub fn event_unresolved_inputs(spec: &WorkflowSpec) -> Vec<String> {
+    spec.inputs
+        .iter()
+        .filter(|(id, def)| def.required && def.default.is_none() && id.0 != "branch")
+        .map(|(id, _)| id.0.clone())
+        .collect()
+}
+
 /// Herdrが渡すイベントから取り出したworktree情報。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeEvent {
@@ -264,6 +293,38 @@ mod tests {
             "{after:?}"
         );
         assert_eq!(after.len(), before.len() + 2);
+    }
+
+    #[test]
+    fn side_effects_digest_distinguishes_lists() {
+        let a = side_effects_digest(&["git hook: post-checkout".to_string()]);
+        assert_eq!(
+            a,
+            side_effects_digest(&["git hook: post-checkout".to_string()])
+        );
+        assert_ne!(a, side_effects_digest(&[]));
+        assert_ne!(
+            side_effects_digest(&["ab".to_string(), "c".to_string()]),
+            side_effects_digest(&["a".to_string(), "bc".to_string()])
+        );
+    }
+
+    #[test]
+    fn required_inputs_without_default_block_events() {
+        use crate::config::model::{InputDef, InputId, InputType};
+        // 設定例は`branch`(必須・既定値なし)と`port`(既定値あり)を持つ。
+        let mut spec =
+            crate::config::load::load_str(include_str!("../examples/workflow.yaml")).unwrap();
+        assert!(event_unresolved_inputs(&spec).is_empty());
+        spec.inputs.insert(
+            InputId("port".to_string()),
+            InputDef {
+                input_type: InputType::Integer,
+                required: true,
+                default: None,
+            },
+        );
+        assert_eq!(event_unresolved_inputs(&spec), vec!["port".to_string()]);
     }
 
     #[test]

@@ -1063,10 +1063,13 @@ fn trust_main(state: &StateDir, args: &Args) -> i32 {
     let repo = crate::approval::repo_key(config.parent().unwrap_or(Path::new(".")));
     let mut summary = crate::approval::summary(&spec);
     // Gitのhookやフィルターもworktreeの作成・checkoutでコマンドを実行しうる。
-    for item in crate::approval::git_side_effects(config.parent().unwrap_or(Path::new("."))) {
-        summary.push_str(&item);
+    // 一覧の要約を承認と一緒に記録し、変わったら再承認を求める(Q13)。
+    let side_effects = crate::approval::git_side_effects(config.parent().unwrap_or(Path::new(".")));
+    for item in &side_effects {
+        summary.push_str(item);
         summary.push('\n');
     }
+    let side_digest = crate::approval::side_effects_digest(&side_effects);
     let store = match Store::open(&state.db_path()) {
         Ok(store) => store,
         Err(error) => {
@@ -1074,7 +1077,7 @@ fn trust_main(state: &StateDir, args: &Args) -> i32 {
             return EXIT_CONNECTION;
         }
     };
-    if let Err(error) = store.approve(&repo, &hash, &summary) {
+    if let Err(error) = store.approve(&repo, &hash, &side_digest, &summary) {
         eprint_error(args.json, "store", &error.to_string());
         return EXIT_CONNECTION;
     }
@@ -1203,11 +1206,35 @@ fn hook_main(state: &StateDir, args: &Args) -> i32 {
             return EXIT_CONNECTION;
         }
     };
-    if !store.is_approved(&repo, &hash).unwrap_or(false) {
-        let _ = store.accept_once(&key, Some("needs-approval"));
+    let side_digest =
+        crate::approval::side_effects_digest(&crate::approval::git_side_effects(&primary));
+    match store.approval_status(&repo, &hash, &side_digest) {
+        Ok(crate::runtime::store::ApprovalStatus::Approved) => {}
+        status => {
+            let _ = store.accept_once(&key, Some("needs-approval"));
+            let why = if matches!(
+                status,
+                Ok(crate::runtime::store::ApprovalStatus::SideEffectsChanged)
+            ) {
+                " (Git hooks or filters changed since approval)"
+            } else {
+                ""
+            };
+            println!(
+                "holdReason=needs-approval{why}: run `herdr-workflow trust --config {}`",
+                config.display()
+            );
+            return EXIT_NEEDS_APPROVAL;
+        }
+    }
+    // 既定値のない必須入力はイベントから決められないため、推測せず保留する(Q13)。
+    let unresolved = crate::approval::event_unresolved_inputs(&spec);
+    if !unresolved.is_empty() {
+        let _ = store.release_held(&key);
+        let _ = store.accept_once(&key, Some("needs-input"));
         println!(
-            "holdReason=needs-approval: run `herdr-workflow trust --config {}`",
-            config.display()
+            "holdReason=needs-input: inputs {} have no default; start it with `herdr-workflow up`",
+            unresolved.join(", ")
         );
         return EXIT_NEEDS_APPROVAL;
     }

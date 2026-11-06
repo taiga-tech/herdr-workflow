@@ -14,6 +14,8 @@ updated: '2026-09-12'
 
 非対話実行を追加した。`run --target`、`up`、`attach`、`wait`、`status`、`logs`、`stop`、`resume`、`retry`、`cleanup plan`、`remove`(借用checkoutは削除しない)、`trust`、`hook`、`doctor`を使える。Coordinatorは状態ディレクトリごとに一つ自動起動し、SQLiteの状態ストアとUnix domain socketの制御通信を使う。`up --herdr`では、Herdrでworktreeを作成し、初期化後にtab・paneを配置してAgentを起動する(Herdr実機では未試験)。Agentの観測値(`idle`・`working`等)を追跡して状態画面に表示する。Herdr連携のRunも`resume`・`retry`でき、配置済みの画面は作り直さない。ログ・状態paneはresume後の新しいAttemptも表示し続ける。プラグイン全体設定`logs`でログの大きさ、世代数、保持日数、総容量を設定できる。TaskRunnerをAttemptごとの別プロセスにし、Coordinatorが異常終了しても実行中のタスクを止めず、再起動後に結果を取り込む。
 
+承認の成立条件(Q13)と粒度(Q09)を決めた。承認にはGitのhook・フィルターの一覧の要約も記録し、一覧が変わったら再承認を求める。イベント経路では既定値のない必須入力を推測せず`needs-input`で保留する。状態ストアは版5になり、版4以前の承認は再承認が必要になる。
+
 ## 文書版0.2 — 2026-09-12
 
 固有の仕様を持たない旧設計書パスの案内と、移管時の一回限りの検査結果を削除した。元資料と移行表は監査用に維持し、誤って整形されていた元資料を記録済みの原本へ復元した。

@@ -311,6 +311,29 @@ fn worktree_event_requires_approval_and_is_accepted_once() {
     let changed = hook(&env);
     assert_eq!(changed.status.code(), Some(3), "{changed:?}");
     assert!(!wt.join("init-ran-2").exists());
+
+    // 承認後にGitのhookが増えたら、同じ設定でも再承認を求める(Q13)。
+    let trust = env.cli(&["trust", "--config", path(&config)]);
+    assert_eq!(trust.status.code(), Some(0), "{trust:?}");
+    let git_hook = repo.join(".git/hooks/post-checkout");
+    std::fs::write(&git_hook, "#!/bin/sh\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&git_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let hooks_changed = hook(&env);
+    assert_eq!(hooks_changed.status.code(), Some(3), "{hooks_changed:?}");
+    assert!(String::from_utf8_lossy(&hooks_changed.stdout).contains("hooks or filters changed"));
+    assert!(!wt.join("init-ran-2").exists());
+    let trust = env.cli(&["trust", "--config", path(&config)]);
+    assert_eq!(trust.status.code(), Some(0), "{trust:?}");
+    assert!(String::from_utf8_lossy(&trust.stdout).contains("git hook: post-checkout"));
+    let accepted = hook(&env);
+    assert_eq!(accepted.status.code(), Some(0), "{accepted:?}");
+    let run_id = String::from_utf8_lossy(&accepted.stdout).trim().to_string();
+    let wait = env.cli(&["wait", &run_id, "--until", "finished", "--timeout", "20"]);
+    assert_eq!(wait.status.code(), Some(0), "{wait:?}");
+    assert!(wt.join("init-ran-2").exists());
 }
 
 #[test]

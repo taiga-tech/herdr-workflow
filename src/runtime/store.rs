@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::engine::{Recorder, RunOutcome, RunPhase, RunSnapshot};
 use crate::runtime::logs;
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -59,6 +59,16 @@ pub struct Store {
     conn: Connection,
 }
 
+/// 承認の照合結果(docs/specs/security.md#approval)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalStatus {
+    Approved,
+    /// 同じリポジトリと設定ハッシュの承認がない。
+    Missing,
+    /// 承認後にGitのhookやフィルターが変わった。
+    SideEffectsChanged,
+}
+
 fn enum_text<T: Serialize>(value: &T) -> String {
     serde_json::to_value(value)
         .ok()
@@ -95,7 +105,7 @@ impl Store {
             });
         }
         if version > 0 && version < SCHEMA_VERSION {
-            // 更新前にバックアップを作る(現行の版は1のみなので到達しない)。
+            // 既存の版から更新する前にバックアップを作る。
             let backup = path.with_extension(format!("v{version}.bak"));
             std::fs::copy(path, &backup).map_err(|error| StoreError::Backup(error.to_string()))?;
         }
@@ -170,6 +180,16 @@ impl Store {
                 "BEGIN;
                 ALTER TABLE runs ADD COLUMN herdr_state TEXT;
                 PRAGMA user_version = 4;
+                COMMIT;",
+            )?;
+        }
+        if version < 5 {
+            // 版5: 承認時に表示したGitのhook・フィルターの要約(Q13)。版4以前の承認は
+            // 要約を持たないため一致せず、再承認が必要になる。
+            conn.execute_batch(
+                "BEGIN;
+                ALTER TABLE approvals ADD COLUMN side_effects TEXT NOT NULL DEFAULT '';
+                PRAGMA user_version = 5;
                 COMMIT;",
             )?;
         }
@@ -370,26 +390,50 @@ impl Store {
         Ok(())
     }
 
-    pub fn approve(&self, repo: &str, config_hash: &str, summary: &str) -> Result<(), StoreError> {
+    /// 承認を記録する。`side_effects`は承認時のGitのhook・フィルターの要約。
+    pub fn approve(
+        &self,
+        repo: &str,
+        config_hash: &str,
+        side_effects: &str,
+        summary: &str,
+    ) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO approvals (repo, config_hash, approved_at, summary) VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO approvals (repo, config_hash, approved_at, summary, side_effects)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(repo, config_hash) DO UPDATE SET approved_at = excluded.approved_at,
-                summary = excluded.summary",
-            params![repo, config_hash, logs::rfc3339(std::time::SystemTime::now()), summary],
+                summary = excluded.summary, side_effects = excluded.side_effects",
+            params![
+                repo,
+                config_hash,
+                logs::rfc3339(std::time::SystemTime::now()),
+                summary,
+                side_effects
+            ],
         )?;
         Ok(())
     }
 
-    pub fn is_approved(&self, repo: &str, config_hash: &str) -> Result<bool, StoreError> {
-        Ok(self
+    /// 承認の照合。設定ハッシュが一致しても、Gitのhook・フィルターが変わっていれば無効。
+    pub fn approval_status(
+        &self,
+        repo: &str,
+        config_hash: &str,
+        side_effects: &str,
+    ) -> Result<ApprovalStatus, StoreError> {
+        let recorded: Option<String> = self
             .conn
             .query_row(
-                "SELECT 1 FROM approvals WHERE repo = ?1 AND config_hash = ?2",
+                "SELECT side_effects FROM approvals WHERE repo = ?1 AND config_hash = ?2",
                 params![repo, config_hash],
-                |_| Ok(()),
+                |row| row.get(0),
             )
-            .optional()?
-            .is_some())
+            .optional()?;
+        Ok(match recorded {
+            None => ApprovalStatus::Missing,
+            Some(recorded) if recorded == side_effects => ApprovalStatus::Approved,
+            Some(_) => ApprovalStatus::SideEffectsChanged,
+        })
     }
 
     /// 自動受付を一度だけ記録する。既に同じキーがあれば`false`(重複)。
@@ -536,9 +580,23 @@ mod tests {
         }
         let store = Store::open(&path).unwrap();
         assert!(path.with_extension("v1.bak").exists());
-        assert!(!store.is_approved("repo", "h").unwrap());
-        store.approve("repo", "h", "summary").unwrap();
-        assert!(store.is_approved("repo", "h").unwrap());
+        assert_eq!(
+            store.approval_status("repo", "h", "s").unwrap(),
+            ApprovalStatus::Missing
+        );
+        store.approve("repo", "h", "s", "summary").unwrap();
+        assert_eq!(
+            store.approval_status("repo", "h", "s").unwrap(),
+            ApprovalStatus::Approved
+        );
+        assert_eq!(
+            store.approval_status("repo", "h", "other").unwrap(),
+            ApprovalStatus::SideEffectsChanged
+        );
+        assert_eq!(
+            store.approval_status("repo", "h2", "s").unwrap(),
+            ApprovalStatus::Missing
+        );
         assert!(store.accept_once("k", None).unwrap());
         assert!(!store.accept_once("k", None).unwrap());
     }

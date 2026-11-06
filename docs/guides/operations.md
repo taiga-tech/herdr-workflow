@@ -64,14 +64,14 @@ herdr-workflow cleanup plan RUN_ID
 
 ## 症状からの参照
 
-| 状況                             | 確認する内容                                    | 仕様                                                                       |
-| -------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------- |
-| Agentが初期化より先に起動する    | bootstrap対象、暗黙ノード、他プラグインとの競合 | [DAG](../specs/workflow.md)・[外部連携](../integrations/external-tools.md) |
-| 別のサーバーをreadyと誤認する    | ポート、Attempt、生存情報、応答の識別           | [観測](../specs/observability.md)                                          |
-| 通知が重複して初期化される       | pending operation、checkout世代、排他キー       | [復旧](../specs/recovery.md)                                               |
-| ログ画面を閉じてもコマンドが残る | ログ表示と停止操作の区別                        | [実行](../specs/execution.md)                                              |
-| ログ・DBの書き込みに失敗する     | 容量、権限、劣化記録、新規起動の停止            | [観測](../specs/observability.md)・[永続化](../specs/persistence.md)       |
-| 自動初期化が保留される           | 設定変更、承認範囲、`needs-approval`            | [承認](../specs/security.md)                                               |
+| 状況                             | 確認する内容                                      | 仕様                                                                       |
+| -------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| Agentが初期化より先に起動する    | bootstrap対象、暗黙ノード、他プラグインとの競合   | [DAG](../specs/workflow.md)・[外部連携](../integrations/external-tools.md) |
+| 別のサーバーをreadyと誤認する    | ポート、Attempt、生存情報、応答の識別             | [観測](../specs/observability.md)                                          |
+| 通知が重複して初期化される       | pending operation、checkout世代、排他キー         | [復旧](../specs/recovery.md)                                               |
+| ログ画面を閉じてもコマンドが残る | ログ表示と停止操作の区別                          | [実行](../specs/execution.md)                                              |
+| ログ・DBの書き込みに失敗する     | 容量、権限、劣化記録、新規起動の停止              | [観測](../specs/observability.md)・[永続化](../specs/persistence.md)       |
+| 自動初期化が保留される           | 設定・hookの変更、`needs-approval`・`needs-input` | [承認](../specs/security.md)                                               |
 
 操作ログを問い合わせやPRへ添えるときは、秘密値やファイル内容、環境変数全体を含めない。
 
