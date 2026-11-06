@@ -30,9 +30,20 @@ CLIを呼ぶ場合は、Herdrが渡した`HERDR_BIN_PATH`を優先する。直�
 
 詳細なTask一覧は、プラグインの端末画面を初期の表示先とする。
 
-Herdr側への補助表示には、公開メタデータAPIでworkspace単位の集計値を報告する案を採る。例は`flow_state`、`flow_failed`、`flow_running`である。表示に必要なHerdr設定の変更は案を提示し、利用者の設定を無断で書き換えない。
+<a id="sidebar-tokens"></a>
 
-通常コマンドをAgentと偽って登録しない。公開APIで任意のTask一覧を独立したサイドバーセクションとして追加できることは確認できていないため、その機能は本体拡張の検討事項として残す。既存のAgent表示条件を操作するAPIと、任意のUI追加を区別する。[S1](../reference/sources.md#s1)
+Herdr側への補助表示には、`workspace.report_metadata`でworkspace単位の集計値をtokenとして報告する([Q03](../planning/open-questions.md#q03))。Herdr連携のRunは、状態を保存するたびに集計し、値が変わったときだけ報告する。報告の失敗はRunの結果に影響させない。
+
+| token           | 値                                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------------- |
+| `flow_state`    | `queued`・`preparing`・`active`・`stopping`、終了後は`succeeded`・`failed`・`cancelled`・`unknown` |
+| `flow_running`  | 起動中・実行中のTask数                                                                             |
+| `flow_failed`   | 失敗・状態不明のTask数                                                                             |
+| `flow_progress` | `成功数/Task数`                                                                                    |
+
+Herdr v0.9.5の文書では、workspaceのtokenはSpace sidebar行に`$flow_state`のように書くと表示される。[S1](../reference/sources.md#s1) 表示に必要なHerdr設定は利用者が追加し、本プラグインは利用者の設定を書き換えない。tokenはHerdrの再起動後に復元されないため、次の状態変化で報告し直す。
+
+通常コマンドをAgentと偽って登録しない。v0.9.5の公開APIには任意のTask一覧を独立したサイドバー区画として追加する手段の記載がないため、詳細なTask一覧は端末画面で表示し、ネイティブの区画追加はHerdr本体への変更案として扱う。既存のAgent表示条件を操作するAPIと、任意のUI追加を区別する。[S1](../reference/sources.md#s1)
 
 ### 状態画面
 
@@ -76,7 +87,7 @@ developer     running     ready      observed: idle
 
 2026-09-16、稼働中のHerdr v0.9.0(Linux、client/serverともprotocol 22)について、既定設定、pane CLI、Socket APIスキーマを確認した。pane数を制限する公開設定、APIフィールド、配列の`maxItems`、上限超過エラーは確認できなかった。この結果はHerdr内部に実装上の限界が存在しないことを保証しないため、Herdr Workflow側でtabごとのpane数を32以下に制限し、上限変更時は対象Herdr版で実動作を測定する。
 
-任意Task一覧をネイティブサイドバーへ追加する機能は提供可能と断定しない。状態画面と集計メタデータの経路を先に検証する。
+任意Task一覧をネイティブサイドバーへ追加する機能は提供しない。状態画面と集計token([サイドバー](#sidebar-tokens))で代える。
 
 ## 関連文書
 

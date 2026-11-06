@@ -20,6 +20,8 @@ updated: '2026-09-12'
 
 プラグイン全体設定に`limits.layout.maxPanesPerWorkspace`(既定値兼安全上限128)を追加し、全tabのpane数の合計を配置前に制限する(Q10)。
 
+Herdr連携のRunは、集計値(`flow_state`・`flow_running`・`flow_failed`・`flow_progress`)をworkspaceのtokenとして変化のたびに報告する。HerdrのSpace sidebar行に`$flow_state`等を書くと表示できる(Q03)。
+
 ## 文書版0.2 — 2026-09-12
 
 固有の仕様を持たない旧設計書パスの案内と、移管時の一回限りの検査結果を削除した。元資料と移行表は監査用に維持し、誤って整形されていた元資料を記録済みの原本へ復元した。

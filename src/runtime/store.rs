@@ -508,13 +508,17 @@ pub struct StoreRecorder<'a> {
     pub store: &'a mut Store,
     pub run_id: String,
     pub on_notice: Box<dyn FnMut(&str) + 'a>,
+    /// 状態を保存した後に呼ぶ(Herdrへの集計値の報告等、表示だけの用途)。
+    pub on_snapshot: Box<dyn FnMut(&RunSnapshot) + 'a>,
 }
 
 impl Recorder for StoreRecorder<'_> {
     fn record(&mut self, snapshot: &RunSnapshot) -> Result<(), String> {
         self.store
             .save_snapshot(snapshot)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        (self.on_snapshot)(snapshot);
+        Ok(())
     }
 
     fn notice(&mut self, message: &str) {

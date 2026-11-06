@@ -328,6 +328,50 @@ pub fn report_metadata(
     Ok(())
 }
 
+/// サイドバーに表示できるworkspaceのtoken(Q03)。利用者がHerdrのSpace行に`$flow_state`等を
+/// 書くと表示される。Herdrの規則(名前は1〜32文字、値は80文字まで)に収まる値だけを返す。
+#[must_use]
+pub fn sidebar_tokens(snapshot: &crate::runtime::engine::RunSnapshot) -> BTreeMap<String, String> {
+    use crate::runtime::engine::{RunOutcome, RunPhase};
+    use crate::state::models::TaskState;
+    let state = match (snapshot.phase, snapshot.outcome) {
+        (RunPhase::Finished | RunPhase::Stopped, RunOutcome::Succeeded) => "succeeded",
+        (RunPhase::Finished | RunPhase::Stopped, RunOutcome::Failed) => "failed",
+        (RunPhase::Finished | RunPhase::Stopped, RunOutcome::Cancelled) => "cancelled",
+        (RunPhase::Finished | RunPhase::Stopped, _) => "unknown",
+        (RunPhase::Queued, _) => "queued",
+        (RunPhase::Preparing, _) => "preparing",
+        (RunPhase::Active, _) => "active",
+        (RunPhase::Stopping, _) => "stopping",
+    };
+    let count = |states: &[TaskState]| {
+        snapshot
+            .tasks
+            .values()
+            .filter(|task| states.contains(&task.runtime.state))
+            .count()
+    };
+    BTreeMap::from([
+        ("flow_state".to_string(), state.to_string()),
+        (
+            "flow_running".to_string(),
+            count(&[TaskState::Starting, TaskState::Running]).to_string(),
+        ),
+        (
+            "flow_failed".to_string(),
+            count(&[TaskState::Failed, TaskState::Unknown]).to_string(),
+        ),
+        (
+            "flow_progress".to_string(),
+            format!(
+                "{}/{}",
+                count(&[TaskState::Succeeded]),
+                snapshot.tasks.len()
+            ),
+        ),
+    ])
+}
+
 /// Agent名はHerdrの規則`[a-z][a-z0-9_-]{0,31}`に合わせる。
 #[must_use]
 pub fn agent_name(task: &str) -> String {
@@ -471,6 +515,45 @@ mod tests {
     use super::fake::FakeHerdr;
     use super::*;
     use crate::runtime::state_dir::test_support::TempDir;
+
+    #[test]
+    fn sidebar_tokens_summarize_the_run() {
+        use crate::config::model::TaskId;
+        use crate::runtime::engine::{RunOutcome, RunPhase, RunSnapshot, TaskKind, TaskSnapshot};
+        use crate::state::models::{TaskRuntimeState, TaskState};
+        let task = |state| TaskSnapshot {
+            kind: TaskKind::Job,
+            runtime: TaskRuntimeState {
+                state,
+                ..Default::default()
+            },
+            detail: None,
+        };
+        let mut snapshot = RunSnapshot {
+            run_id: "r".to_string(),
+            phase: RunPhase::Active,
+            outcome: RunOutcome::Pending,
+            target: None,
+            tasks: BTreeMap::from([
+                (TaskId::from("a"), task(TaskState::Succeeded)),
+                (TaskId::from("b"), task(TaskState::Running)),
+                (TaskId::from("c"), task(TaskState::Failed)),
+                (TaskId::from("d"), task(TaskState::Waiting)),
+            ]),
+            updated_at: String::new(),
+        };
+        let tokens = sidebar_tokens(&snapshot);
+        assert_eq!(tokens["flow_state"], "active");
+        assert_eq!(tokens["flow_running"], "1");
+        assert_eq!(tokens["flow_failed"], "1");
+        assert_eq!(tokens["flow_progress"], "1/4");
+        snapshot.phase = RunPhase::Finished;
+        snapshot.outcome = RunOutcome::Failed;
+        assert_eq!(sidebar_tokens(&snapshot)["flow_state"], "failed");
+        for (name, value) in &tokens {
+            assert!(name.len() <= 32 && value.len() <= 80);
+        }
+    }
 
     #[test]
     fn layout_is_sent_as_a_new_tab_and_pane_ids_are_mapped() {

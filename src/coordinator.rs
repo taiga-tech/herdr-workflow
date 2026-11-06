@@ -484,10 +484,6 @@ fn layout_hook(
             };
             results.insert(task.clone(), result);
         }
-        let tokens = BTreeMap::from([("flow_state".to_string(), "active".to_string())]);
-        if let Err(error) = herdr::report_metadata(&mut client, &state.workspace_id, &tokens) {
-            summary.push(format!("metadata not reported: {error}"));
-        }
         Ok(engine::InitOutcome {
             message: format!("@layout.create: {}", summary.join(", ")),
             agents: results,
@@ -640,10 +636,12 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
     prepared.config.initial = std::mem::take(&mut start.initial);
     // TaskRunnerは別プロセスで起動し、Coordinatorが終了しても子プロセスを止めない(ADR-0002)。
     prepared.config.runner = shared.runner.clone();
+    let mut sidebar_target = None;
     if start.herdr {
         let workspace_id = workspace_id.ok_or_else(|| {
             herdr_error("HERDR_WORKSPACE_ID is not set; run inside a Herdr workspace")
         })?;
+        sidebar_target = Some((socket.clone().unwrap_or_default(), workspace_id.clone()));
         prepared.config.on_init_complete = Some(layout_hook(
             socket.clone().unwrap_or_default(),
             workspace_id,
@@ -744,6 +742,25 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             },
         );
     }
+    // Herdr連携のRunでは、集計値が変わったときだけworkspaceのtokenを報告する(Q03)。
+    // 表示だけの用途なので、報告の失敗でRunを止めない。
+    let sidebar_reporter: Box<dyn FnMut(&engine::RunSnapshot) + Send> =
+        match (start.herdr, sidebar_target) {
+            (true, Some((socket, workspace))) => {
+                let mut last = BTreeMap::new();
+                Box::new(move |snapshot: &engine::RunSnapshot| {
+                    let tokens = crate::herdr::sidebar_tokens(snapshot);
+                    if tokens == last {
+                        return;
+                    }
+                    let mut client = crate::herdr::HerdrClient::new(socket.clone());
+                    if crate::herdr::report_metadata(&mut client, &workspace, &tokens).is_ok() {
+                        last = tokens;
+                    }
+                })
+            }
+            _ => Box::new(|_: &engine::RunSnapshot| {}),
+        };
     let thread_shared = Arc::clone(shared);
     let state = shared.state.clone();
     let config = prepared.config;
@@ -812,6 +829,7 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
             store: &mut store,
             run_id: thread_run_id.clone(),
             on_notice: Box::new(|_| {}),
+            on_snapshot: sidebar_reporter,
         };
         let report = Engine::new(config, state, &mut recorder, control_rx).run();
         drop(recorder);
@@ -1808,15 +1826,17 @@ mod tests {
             .into_iter()
             .filter(|method| method != "agent.get")
             .collect();
-        assert_eq!(
-            methods,
-            [
-                "worktree.create",
-                "layout.apply",
-                "agent.start",
-                "workspace.report_metadata"
-            ]
-        );
+        // サイドバー用の集計値は、変わるたびに報告する(Q03)。
+        let reports = methods
+            .iter()
+            .filter(|method| *method == "workspace.report_metadata")
+            .count();
+        assert!(reports >= 2, "{methods:?}");
+        let methods: Vec<&String> = methods
+            .iter()
+            .filter(|method| *method != "workspace.report_metadata")
+            .collect();
+        assert_eq!(methods, ["worktree.create", "layout.apply", "agent.start"]);
         // T10: idleやdoneを観測してもTaskの成功へ変換せず、観測値として記録する。
         let events: Vec<String> = store
             .events(&run_id, 0)
@@ -1839,7 +1859,16 @@ mod tests {
         let developer = &tasks[&TaskId::from("developer")];
         assert_eq!(developer.kind, engine::TaskKind::Agent);
         assert_eq!(developer.runtime.state, TaskState::Stopped);
-        let requests = fake.requests.lock().unwrap().clone();
+        let (reports, requests): (Vec<Value>, Vec<Value>) = fake
+            .requests
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .partition(|request| request["method"] == "workspace.report_metadata");
+        let last = &reports.last().unwrap()["params"];
+        assert_eq!(last["workspace_id"], "w9");
+        assert_eq!(last["tokens"]["flow_state"], "succeeded");
         assert_eq!(requests[0]["params"]["branch"], "feature/x");
         assert_eq!(requests[1]["params"]["workspace_id"], "w9");
         let log_pane = &requests[1]["params"]["root"]["first"];
