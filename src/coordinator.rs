@@ -1123,9 +1123,38 @@ pub fn reconcile_orphans(state: &StateDir, store: &mut Store) -> Result<usize, C
             match runtime.state {
                 TaskState::Starting | TaskState::Running | TaskState::Stopping => {}
                 TaskState::Waiting => {
-                    runtime.state = TaskState::Cancelled;
-                    task.detail = Some("coordinator stopped before start".to_string());
-                    continue;
+                    // T14: 起動後・記録前に終了した場合は、次のAttemptの起動証跡が残る。
+                    // その場合は起動済みとして照合し、未起動扱いで再実行しない。
+                    let next = runtime
+                        .attempts
+                        .last()
+                        .map_or(1, |attempt| attempt.attempt_id.0 + 1);
+                    let launch: Option<engine::LaunchFile> = std::fs::read(
+                        state
+                            .attempt_dir(&run.run_id, &id.0, next)
+                            .join("launch.json"),
+                    )
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+                    let Some(launch) = launch else {
+                        runtime.state = TaskState::Cancelled;
+                        task.detail = Some("coordinator stopped before start".to_string());
+                        continue;
+                    };
+                    runtime.record_attempt_result(crate::state::models::AttemptResult {
+                        attempt_id: crate::state::models::AttemptId(next),
+                        launch_evidence: crate::state::models::LaunchEvidence {
+                            pid: Some(launch.child.pid),
+                            started_at: Some(launch.started_at.clone()),
+                            command_summary: launch.command.clone(),
+                        },
+                        outcome: AttemptOutcome::Pending,
+                        log_position: crate::state::models::LogPosition {
+                            byte_offset: 0,
+                            line_number: 0,
+                        },
+                    });
+                    runtime.state = TaskState::Running;
                 }
                 _ => continue,
             }
@@ -2032,6 +2061,99 @@ mod tests {
         assert!(state.run_dir("b").exists());
         assert!(state.run_dir("d").exists());
         assert!(prune_by_total(&state, &store, 2500).unwrap().is_empty());
+    }
+
+    #[test]
+    fn launch_recorded_only_by_the_runner_is_not_treated_as_unstarted() {
+        // T14: 状態ストアに起動を記録する前にCoordinatorが終了しても、起動証跡から
+        // 起動済みと判断し、結果を取り込む(未起動として再実行しない)。
+        use crate::runtime::state_dir::test_support::TempDir;
+        let tmp = TempDir::new("coord-t14");
+        let state = StateDir::open(tmp.0.join("state")).unwrap();
+        let mut store = Store::open(&state.db_path()).unwrap();
+        store
+            .insert_run(&RunRecord {
+                run_id: "r".to_string(),
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                plan_hash: String::new(),
+                config_path: PathBuf::from("/c"),
+                checkout: PathBuf::from("/w"),
+                target: None,
+                phase: RunPhase::Active,
+                outcome: RunOutcome::Pending,
+                workflow: String::new(),
+                inputs: Vec::new(),
+                coordinator_pid: None,
+                plugin_config: String::new(),
+                owned_workspace: None,
+                herdr_state: None,
+            })
+            .unwrap();
+        let waiting = |kind| engine::TaskSnapshot {
+            kind,
+            runtime: crate::state::models::TaskRuntimeState::default(),
+            detail: None,
+        };
+        store
+            .save_snapshot(&engine::RunSnapshot {
+                run_id: "r".to_string(),
+                phase: RunPhase::Active,
+                outcome: RunOutcome::Pending,
+                target: None,
+                tasks: BTreeMap::from([
+                    (TaskId::from("migrate"), waiting(engine::TaskKind::Job)),
+                    (TaskId::from("later"), waiting(engine::TaskKind::Job)),
+                ]),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            })
+            .unwrap();
+        let dir = state.attempt_dir("r", "migrate", 1);
+        state.ensure_subdir(&dir).unwrap();
+        // 既に終了したプロセスの起動証跡と、TaskRunnerが確定した結果。
+        let launch = engine::LaunchFile {
+            run_id: "r".to_string(),
+            task_id: "migrate".to_string(),
+            attempt_id: 1,
+            command: "migrate".to_string(),
+            cwd: PathBuf::from("/w"),
+            child: process::ProcessIdentity {
+                pid: u32::MAX - 1,
+                start_time: Some(1),
+                pgid: Some(u32::MAX - 1),
+                boot_id: Some("old-boot".to_string()),
+            },
+            runner: None,
+            started_at: "2026-01-01T00:00:00.000Z".to_string(),
+        };
+        std::fs::write(
+            dir.join("launch.json"),
+            serde_json::to_vec(&launch).unwrap(),
+        )
+        .unwrap();
+        let result = engine::ResultFile {
+            run_id: "r".to_string(),
+            task_id: "migrate".to_string(),
+            attempt_id: 1,
+            exit_code: Some(0),
+            signal: None,
+            finished_at: "2026-01-01T00:00:01.000Z".to_string(),
+        };
+        std::fs::write(
+            dir.join("result.json"),
+            serde_json::to_vec(&result).unwrap(),
+        )
+        .unwrap();
+
+        reconcile_orphans(&state, &mut store).unwrap();
+        let tasks = store.tasks("r").unwrap();
+        let migrate = &tasks[&TaskId::from("migrate")];
+        assert_eq!(migrate.runtime.state, TaskState::Succeeded, "{migrate:?}");
+        assert_eq!(migrate.runtime.attempts.len(), 1);
+        assert_eq!(
+            tasks[&TaskId::from("later")].runtime.state,
+            TaskState::Cancelled
+        );
     }
 
     #[test]
