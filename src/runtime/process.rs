@@ -65,7 +65,16 @@ fn read_boot_id() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+#[path = "process_macos.rs"]
+mod macos;
+
+#[cfg(target_os = "macos")]
+fn read_boot_id() -> Option<String> {
+    macos::boot_id()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn read_boot_id() -> Option<String> {
     None
 }
@@ -77,7 +86,12 @@ fn read_start_time(pid: u32) -> io::Result<Option<u64>> {
     Ok(parse_start_time(&stat))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+fn read_start_time(pid: u32) -> io::Result<Option<u64>> {
+    macos::start_time(pid)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn read_start_time(pid: u32) -> io::Result<Option<u64>> {
     if process_exists(pid) {
         Ok(None)
@@ -93,7 +107,7 @@ fn parse_start_time(stat: &str) -> Option<u64> {
     rest.split_whitespace().nth(19)?.parse().ok()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "macos"), allow(dead_code))]
 fn process_exists(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
@@ -171,8 +185,12 @@ fn parent_pid(stat: &str) -> Option<u32> {
     rest.split_whitespace().nth(1)?.parse().ok()
 }
 
-/// 終了済みで回収待ちのプロセスか(Linuxのみ判定し、他は`false`)。
+/// 終了済みで回収待ちのプロセスか(LinuxとmacOSで判定し、他は`false`)。
 fn is_zombie(pid: u32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::is_zombie(pid)
+    }
     #[cfg(target_os = "linux")]
     {
         std::fs::read_to_string(format!("/proc/{pid}/stat"))
@@ -183,44 +201,51 @@ fn is_zombie(pid: u32) -> bool {
             })
             .unwrap_or(false)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = pid;
         false
     }
 }
 
-/// `root`の子孫プロセス(自身を含まない)の識別情報。Linux以外では空を返す。
+/// 稼働中のプロセスと親PIDの組。
 #[cfg(target_os = "linux")]
-#[must_use]
-pub fn descendants(root: u32) -> Vec<ProcessIdentity> {
+fn process_table() -> Vec<(u32, u32)> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
     };
-    let mut parents = Vec::new();
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            && let Some(ppid) = parent_pid(&stat)
-        {
-            parents.push((pid, ppid));
-        }
-    }
-    let mut found = Vec::new();
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            Some((pid, parent_pid(&stat)?))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn process_table() -> Vec<(u32, u32)> {
+    macos::all_pids()
+        .into_iter()
+        .filter_map(|pid| Some((pid, macos::parent_pid(pid)?)))
+        .collect()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn process_table() -> Vec<(u32, u32)> {
+    Vec::new()
+}
+
+/// `root`の子孫プロセス(自身を含まない)の識別情報。LinuxとmacOS以外では空を返す。
+#[must_use]
+pub fn descendants(root: u32) -> Vec<ProcessIdentity> {
+    let parents = process_table();
+    let mut found: Vec<ProcessIdentity> = Vec::new();
     let mut frontier = vec![root];
     while let Some(parent) = frontier.pop() {
         for (pid, ppid) in &parents {
-            if *ppid == parent
-                && !found
-                    .iter()
-                    .any(|known: &ProcessIdentity| known.pid == *pid)
-            {
+            if *ppid == parent && !found.iter().any(|known| known.pid == *pid) {
                 if let Some(identity) = observe(*pid) {
                     found.push(identity);
                 }
@@ -229,12 +254,6 @@ pub fn descendants(root: u32) -> Vec<ProcessIdentity> {
         }
     }
     found
-}
-
-#[cfg(not(target_os = "linux"))]
-#[must_use]
-pub fn descendants(_root: u32) -> Vec<ProcessIdentity> {
-    Vec::new()
 }
 
 /// 記録した識別情報と一致する場合だけ、そのPIDへ信号を送る。
