@@ -44,3 +44,17 @@ title = "Stop workflow runs in this workspace"
 description = "Stop the owned tasks of active runs in the current workspace (worktrees and panes are kept)"
 contexts = ["workspace"]
 command = ["target/release/herdr-workflow", "stop", "--current"]
+
+[[actions]]
+id = "cleanup-review"
+title = "Review workflow cleanup"
+description = "Show removal candidates and hold reasons for the latest run in this workspace (nothing is deleted)"
+contexts = ["workspace"]
+command = ["target/release/herdr-workflow", "cleanup", "plan", "--current"]
+
+# 入力(ブランチ名等)を尋ねてから、Herdr連携でRunを開始する端末画面。
+[[panes]]
+id = "up"
+title = "Start a workflow run"
+placement = "popup"
+command = ["target/release/herdr-workflow", "up", "--herdr", "--interactive"]

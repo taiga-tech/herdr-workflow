@@ -72,6 +72,8 @@ struct Args {
     keep: bool,
     /// Herdrの現在のworkspaceを対象にする(action用)。
     current: bool,
+    /// 指定されていない入力を端末で尋ねる。
+    interactive: bool,
     idle_exit: Option<u64>,
 }
 
@@ -125,6 +127,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--watch" => parsed.watch = true,
             "--keep" => parsed.keep = true,
             "--current" => parsed.current = true,
+            "--interactive" => parsed.interactive = true,
             other if other.starts_with("--") => return Err(format!("unknown flag {other:?}")),
             other => parsed.positional.push(other.to_string()),
         }
@@ -285,6 +288,19 @@ fn start_main(state: &StateDir, args: &Args, follow: bool) -> i32 {
         eprint_error(args.json, "compile", &error.to_string());
         return EXIT_CONFIG;
     }
+    let mut inputs = args.inputs.clone();
+    if args.interactive {
+        let stdin = std::io::stdin();
+        if let Err(message) = prompt_missing_inputs(
+            &spec,
+            &mut inputs,
+            &mut stdin.lock(),
+            &mut std::io::stderr(),
+        ) {
+            eprint_error(args.json, "cli", &message);
+            return EXIT_CONFIG;
+        }
+    }
     let checkout = args.checkout.clone().unwrap_or_else(|| PathBuf::from("."));
     let checkout = std::fs::canonicalize(&checkout).unwrap_or(checkout);
     let config_path = std::fs::canonicalize(&config).unwrap_or(config);
@@ -296,7 +312,7 @@ fn start_main(state: &StateDir, args: &Args, follow: bool) -> i32 {
     let params = json!({
         "configPath": config_path,
         "workflow": workflow,
-        "inputs": args.inputs,
+        "inputs": inputs,
         "checkout": checkout,
         "target": args.target,
         "env": coordinator::current_env(),
@@ -320,6 +336,54 @@ fn start_main(state: &StateDir, args: &Args, follow: bool) -> i32 {
         return EXIT_OK;
     }
     follow_run(state, &mut client, &run_id, args.json)
+}
+
+/// 指定されていない入力を端末で尋ねる(Herdrの選択用端末画面から使う)。既定値がある
+/// 入力は空のまま確定すると既定値を使い、必須の入力は空を受け付けない。
+fn prompt_missing_inputs(
+    spec: &crate::config::model::WorkflowSpec,
+    inputs: &mut Vec<(String, String)>,
+    reader: &mut dyn std::io::BufRead,
+    writer: &mut dyn Write,
+) -> Result<(), String> {
+    for (id, def) in &spec.inputs {
+        if inputs.iter().any(|(key, _)| key == &id.0) {
+            continue;
+        }
+        let default = def.default.as_ref().map(|default| match default {
+            crate::config::model::InputDefault::String(text) => text.clone(),
+            crate::config::model::InputDefault::Integer(number) => number.to_string(),
+            crate::config::model::InputDefault::Boolean(flag) => flag.to_string(),
+        });
+        if default.is_none() && !def.required {
+            continue;
+        }
+        loop {
+            match &default {
+                Some(default) => write!(writer, "{} [{default}]: ", id.0),
+                None => write!(writer, "{}: ", id.0),
+            }
+            .and_then(|()| writer.flush())
+            .map_err(|error| error.to_string())?;
+            let mut line = String::new();
+            if reader
+                .read_line(&mut line)
+                .map_err(|error| error.to_string())?
+                == 0
+            {
+                return Err(format!("input {} was not provided", id.0));
+            }
+            let value = line.trim();
+            if !value.is_empty() {
+                inputs.push((id.0.clone(), value.to_string()));
+                break;
+            }
+            if default.is_some() {
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn resume_main(state: &StateDir, args: &Args, retry_task: Option<String>) -> i32 {
@@ -406,7 +470,7 @@ fn follow_run(state: &StateDir, client: &mut Client, run_id: &str, json: bool) -
 }
 
 /// `HERDR_WORKSPACE_ID`のworkspaceで稼働中のRun(Herdr actionから使う)。
-fn current_workspace_runs(state: &StateDir) -> Result<Vec<String>, String> {
+fn current_workspace_runs(state: &StateDir, include_done: bool) -> Result<Vec<String>, String> {
     let workspace = std::env::var("HERDR_WORKSPACE_ID")
         .ok()
         .filter(|id| !id.is_empty())
@@ -414,15 +478,19 @@ fn current_workspace_runs(state: &StateDir) -> Result<Vec<String>, String> {
             "HERDR_WORKSPACE_ID is not set; run this inside a Herdr workspace".to_string()
         })?;
     let store = Store::open(&state.db_path()).map_err(|error| error.to_string())?;
-    runs_in_workspace(&store, &workspace)
+    runs_in_workspace(&store, &workspace, include_done)
 }
 
-fn runs_in_workspace(store: &Store, workspace: &str) -> Result<Vec<String>, String> {
+fn runs_in_workspace(
+    store: &Store,
+    workspace: &str,
+    include_done: bool,
+) -> Result<Vec<String>, String> {
     Ok(store
         .recent_runs(1000)
         .map_err(|error| error.to_string())?
         .into_iter()
-        .filter(|run| !is_done(run.phase))
+        .filter(|run| include_done || !is_done(run.phase))
         .filter(|run| {
             run.owned_workspace.as_deref() == Some(workspace)
                 || run
@@ -437,7 +505,7 @@ fn runs_in_workspace(store: &Store, workspace: &str) -> Result<Vec<String>, Stri
 
 fn stop_main(state: &StateDir, args: &Args) -> i32 {
     if args.current {
-        let runs = match current_workspace_runs(state) {
+        let runs = match current_workspace_runs(state, false) {
             Ok(runs) => runs,
             Err(message) => {
                 eprint_error(args.json, "stop", &message);
@@ -1269,11 +1337,33 @@ fn cleanup_main(state: &StateDir, args: &Args) -> i32 {
         eprint_error(args.json, "cli", "usage: cleanup plan RUN");
         return EXIT_CONFIG;
     }
-    let Some(run_id) = args.positional.get(1) else {
-        eprint_error(args.json, "cli", "usage: cleanup plan RUN");
-        return EXIT_CONFIG;
+    let run_id = if args.current {
+        match current_workspace_runs(state, true) {
+            Ok(runs) => match runs.into_iter().next() {
+                // recent_runsは新しい順なので、先頭がこのworkspaceの最新のRun。
+                Some(run_id) => run_id,
+                None => {
+                    println!("この workspace のRunはありません");
+                    return EXIT_OK;
+                }
+            },
+            Err(message) => {
+                eprint_error(args.json, "cleanup", &message);
+                return EXIT_CONFIG;
+            }
+        }
+    } else {
+        let Some(run_id) = args.positional.get(1) else {
+            eprint_error(
+                args.json,
+                "cli",
+                "usage: cleanup plan RUN | cleanup plan --current",
+            );
+            return EXIT_CONFIG;
+        };
+        run_id.clone()
     };
-    match cleanup_review(state, run_id) {
+    match cleanup_review(state, &run_id) {
         Ok((_, holds, detail)) => {
             if args.json {
                 println!(
@@ -1402,8 +1492,44 @@ mod tests {
                 })
                 .unwrap();
         }
-        let mut found = runs_in_workspace(&store, "w1").unwrap();
+        let mut found = runs_in_workspace(&store, "w1", false).unwrap();
         found.sort();
         assert_eq!(found, ["attached", "owned"]);
+        let mut all = runs_in_workspace(&store, "w1", true).unwrap();
+        all.sort();
+        assert_eq!(all, ["attached", "done", "owned"]);
+    }
+
+    #[test]
+    fn missing_inputs_are_prompted_with_defaults() {
+        let spec = crate::config::load::load_file(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workflow.yaml"),
+        )
+        .unwrap();
+        let mut inputs = Vec::new();
+        let mut answers = std::io::Cursor::new("\nfeature/x\n\n");
+        let mut shown = Vec::new();
+        prompt_missing_inputs(&spec, &mut inputs, &mut answers, &mut shown).unwrap();
+        // 必須のbranchは空を受け付けず聞き直し、既定値のあるportは空で既定値を使う。
+        assert_eq!(inputs, [("branch".to_string(), "feature/x".to_string())]);
+        let shown = String::from_utf8(shown).unwrap();
+        assert_eq!(shown, "branch: branch: port [3000]: ");
+        let mut provided = vec![
+            ("branch".to_string(), "b".to_string()),
+            ("port".to_string(), "1".to_string()),
+        ];
+        let mut empty = std::io::Cursor::new("");
+        prompt_missing_inputs(&spec, &mut provided, &mut empty, &mut Vec::new()).unwrap();
+        assert_eq!(provided.len(), 2);
+        let mut none = Vec::new();
+        assert!(
+            prompt_missing_inputs(
+                &spec,
+                &mut none,
+                &mut std::io::Cursor::new(""),
+                &mut Vec::new()
+            )
+            .is_err()
+        );
     }
 }
