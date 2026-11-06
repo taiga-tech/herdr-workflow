@@ -27,3 +27,13 @@ command = ["target/release/herdr-workflow", "status"]
 [[events]]
 on = "worktree.created"
 command = ["target/release/herdr-workflow", "hook"]
+
+# 既存checkoutを開いたとき。成功済みの初期化は繰り返さない(受付キーで重複を判定)。
+[[events]]
+on = "worktree.opened"
+command = ["target/release/herdr-workflow", "hook"]
+
+# 外部からworktreeが削除されたとき。そのcheckoutで稼働中のRunを停止する。
+[[events]]
+on = "worktree.removed"
+command = ["target/release/herdr-workflow", "hook"]

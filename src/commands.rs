@@ -960,9 +960,53 @@ fn trust_main(state: &StateDir, args: &Args) -> i32 {
 
 /// Herdrの`[[events]]`から呼ばれる受付処理。`worktree.created`/`worktree.opened`で、
 /// 承認済みのworkflowの初期化(`bootstrap.targets`)だけを開始する。
+/// 外部から削除されたcheckoutで稼働中のRunを停止する(T28)。削除済みのパスは作り直さない。
+fn worktree_removed(state: &StateDir, args: &Args, path: &Path) -> i32 {
+    let store = match Store::open(&state.db_path()) {
+        Ok(store) => store,
+        Err(error) => {
+            eprint_error(args.json, "store", &error.to_string());
+            return EXIT_CONNECTION;
+        }
+    };
+    let canonical = std::fs::canonicalize(path).ok();
+    let affected: Vec<RunRecord> = store
+        .recent_runs(1000)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|run| {
+            !is_done(run.phase)
+                && (run.checkout == path || canonical.as_deref() == Some(run.checkout.as_path()))
+        })
+        .collect();
+    if affected.is_empty() {
+        println!("no active run uses {}", path.display());
+        return EXIT_OK;
+    }
+    let mut client = match Client::connect(state) {
+        Ok(client) => client,
+        Err(error) => return remote_exit(args.json, &error),
+    };
+    for run in &affected {
+        let _ = store.add_event(
+            &run.run_id,
+            &format!(
+                "checkout {} was removed outside herdr-workflow; stopping owned tasks",
+                path.display()
+            ),
+        );
+        let _ = client.call("run.stop", json!({ "runId": run.run_id }));
+        println!("stopping {}", run.run_id);
+    }
+    EXIT_OK
+}
+
 fn hook_main(state: &StateDir, args: &Args) -> i32 {
     let event_name = std::env::var("HERDR_PLUGIN_EVENT").unwrap_or_default();
-    if !matches!(event_name.as_str(), "worktree.created" | "worktree.opened") {
+    if !matches!(
+        event_name.as_str(),
+        "worktree.created" | "worktree.opened" | "worktree.removed"
+    ) {
         println!("ignored event {event_name:?}");
         return EXIT_OK;
     }
@@ -971,6 +1015,9 @@ fn hook_main(state: &StateDir, args: &Args) -> i32 {
         eprint_error(args.json, "hook", "event has no worktree record");
         return EXIT_CONFIG;
     };
+    if event_name == "worktree.removed" {
+        return worktree_removed(state, args, &event.path);
+    }
     if event.is_linked_worktree == Some(false) {
         println!("main worktree is not initialized automatically");
         return EXIT_OK;

@@ -56,7 +56,7 @@ developer     running     ready      observed: idle
 
 ### 実装済みの連携
 
-`herdr-plugin.toml`に`[[events]]`で`worktree.created`を登録し、`herdr-workflow hook`が`HERDR_PLUGIN_EVENT`と`HERDR_PLUGIN_EVENT_JSON`を読む。イベントJSONからは`WorktreeInfo`(`path`、`branch`、`is_detached`、`is_linked_worktree`)だけを使い、外側の包み方には依存しない。この形式はHerdr v0.9.5タグの公開文書と`herdr-api.schema.json`、v0.9.0タグの文書で確認したものであり、実機でのイベント配送は試験していない。
+`herdr-plugin.toml`に`[[events]]`で`worktree.created`・`worktree.opened`・`worktree.removed`を登録し、`herdr-workflow hook`が`HERDR_PLUGIN_EVENT`と`HERDR_PLUGIN_EVENT_JSON`を読む。イベントJSONからは`WorktreeInfo`(`path`、`branch`、`is_detached`、`is_linked_worktree`)だけを使い、外側の包み方には依存しない。この形式はHerdr v0.9.5タグの公開文書と`herdr-api.schema.json`、v0.9.0タグの文書で確認したものであり、実機でのイベント配送は試験していない。
 
 `up --herdr`(または`attach --herdr`)では、要求元の`HERDR_SOCKET_PATH`へ1行1要求のJSONで次のメソッドを送る(`src/herdr.rs`)。
 

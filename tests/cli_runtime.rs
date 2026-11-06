@@ -462,3 +462,42 @@ fn coordinator_restart_keeps_running_task_and_imports_its_result() {
     coordinator.kill().unwrap();
     coordinator.wait().unwrap();
 }
+
+#[test]
+fn removed_worktree_event_stops_runs_using_that_checkout() {
+    // T28: 外部からworktreeが消えたら、そのcheckoutで稼働中のRunを止めて状態を更新する。
+    let env = Env::new();
+    let config = env.write_workflow(
+        "  server:\n    type: command\n    lifecycle: service\n    runner: supervised\n    argv: [/bin/sh, -c, 'echo ready; exec sleep 30']\n    waitFor:\n      type: log\n      pattern: ready\n      timeoutSeconds: 10\n",
+        "",
+    );
+    let up = env.cli(&["up", "--config", path(&config)]);
+    let run_id = String::from_utf8_lossy(&up.stdout).trim().to_string();
+    let wait = env.cli(&["wait", &run_id, "--until", "ready", "--timeout", "20"]);
+    assert_eq!(wait.status.code(), Some(0), "{wait:?}");
+    let work = std::fs::canonicalize(env.root.join("work")).unwrap();
+    let payload = format!(
+        "{{\"type\":\"worktree_removed\",\"workspace_id\":\"w2\",\"forced\":false,\"worktree\":{{\"path\":\"{}\",\"branch\":\"main\",\"is_bare\":false,\"is_detached\":false,\"is_prunable\":false,\"is_linked_worktree\":true,\"label\":\"x\"}}}}",
+        work.display()
+    );
+    let hook = env.cli_with(
+        &["hook"],
+        &[
+            ("HERDR_PLUGIN_EVENT", "worktree.removed"),
+            ("HERDR_PLUGIN_EVENT_JSON", &payload),
+        ],
+    );
+    assert_eq!(hook.status.code(), Some(0), "{hook:?}");
+    let finished = env.cli(&[
+        "wait",
+        &run_id,
+        "--until",
+        "finished",
+        "--timeout",
+        "20",
+        "--json",
+    ]);
+    let report: serde_json::Value = serde_json::from_slice(&finished.stdout).unwrap();
+    assert_eq!(report["run"]["phase"], "stopped");
+    assert_eq!(report["tasks"]["server"]["runtime"]["state"], "stopped");
+}
