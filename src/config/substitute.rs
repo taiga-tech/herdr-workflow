@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::config::model::{InputDefault, InputId, InputType, TaskDef, WorkflowSpec};
+use crate::config::model::{
+    EnvValue, InputDefault, InputId, InputType, PortValue, TaskDef, WaitFor, WorkflowSpec,
+};
 use crate::config::validate::ValidateError;
 
 /// HerdrAdapter接続後(段階C以降)にしか値が確定しない名前空間。
@@ -165,7 +167,9 @@ fn parse_input_value(
 pub fn template_fields(spec: &WorkflowSpec) -> Vec<(String, &str)> {
     let mut fields = Vec::new();
 
-    fields.push(("worktree.branch".to_string(), spec.worktree.branch.as_str()));
+    if let Some(branch) = &spec.worktree.branch {
+        fields.push(("worktree.branch".to_string(), branch.as_str()));
+    }
     if let Some(base) = &spec.worktree.base {
         fields.push(("worktree.base".to_string(), base.as_str()));
     }
@@ -175,7 +179,9 @@ pub fn template_fields(spec: &WorkflowSpec) -> Vec<(String, &str)> {
             fields.push(("defaults.cwd".to_string(), cwd.as_str()));
         }
         for (key, value) in &defaults.env {
-            fields.push((format!("defaults.env.{key}"), value.as_str()));
+            if let EnvValue::Value(value) = value {
+                fields.push((format!("defaults.env.{key}"), value.as_str()));
+            }
         }
     }
 
@@ -201,14 +207,28 @@ pub fn template_fields(spec: &WorkflowSpec) -> Vec<(String, &str)> {
             ..
         } = def
         {
-            for (index, arg) in argv.iter().enumerate() {
+            // scriptのshell・sourceは値置換の対象外(docs/specs/execution.md#script)。
+            for (index, arg) in argv.iter().flatten().enumerate() {
                 fields.push((format!("tasks.{}.argv.{index}", task_id.0), arg.as_str()));
             }
             for (key, value) in env {
-                fields.push((format!("tasks.{}.env.{key}", task_id.0), value.as_str()));
+                // 秘密値参照とnullは置換対象の文字列を持たない。
+                if let EnvValue::Value(value) = value {
+                    fields.push((format!("tasks.{}.env.{key}", task_id.0), value.as_str()));
+                }
             }
-            if let Some(crate::config::model::WaitFor::Http { url, .. }) = wait_for {
-                fields.push((format!("tasks.{}.waitFor.url", task_id.0), url.as_str()));
+            match wait_for.as_deref() {
+                Some(WaitFor::Http { url, .. }) => {
+                    fields.push((format!("tasks.{}.waitFor.url", task_id.0), url.as_str()));
+                }
+                Some(WaitFor::Tcp { host, port, .. }) => {
+                    fields.push((format!("tasks.{}.waitFor.host", task_id.0), host.as_str()));
+                    if let PortValue::Template(port) = port {
+                        fields.push((format!("tasks.{}.waitFor.port", task_id.0), port.as_str()));
+                    }
+                }
+                // logのpatternは正規表現であり値置換を行わない。
+                Some(WaitFor::Log { .. }) | None => {}
             }
         }
     }
@@ -255,6 +275,13 @@ pub fn substitute_all(
             cursor = placeholder.start + placeholder.raw.len();
         }
         result.push_str(&raw[cursor..]);
+        // TCPのポートは置換後に整数として確定していなければならない(実行時変数も不可)。
+        if path.ends_with(".waitFor.port") && !result.parse::<u16>().is_ok_and(|port| port != 0) {
+            return Err(ValidateError::InvalidTcpPort {
+                path,
+                value: result,
+            });
+        }
         values.insert(path, result);
     }
     Ok(ResolvedValues(values))
@@ -423,5 +450,45 @@ mod tests {
         let resolved = resolve_inputs(&spec, &provided).unwrap();
         let values = substitute_all(&spec, &resolved).unwrap();
         assert_eq!(values.0["worktree.branch"], "feature/x");
+    }
+
+    fn spec_with_tcp_port(port: &str) -> WorkflowSpec {
+        let yaml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workflow.yaml"),
+        )
+        .unwrap()
+        .replacen(
+            "      type: http\n      url: 'http://127.0.0.1:${inputs.port}/'\n      status: 200\n",
+            &format!("      type: tcp\n      port: '{port}'\n"),
+            1,
+        );
+        serde_yaml_ng::from_str(&yaml).unwrap()
+    }
+
+    #[test]
+    fn tcp_port_template_is_resolved_to_an_integer() {
+        let spec = spec_with_tcp_port("${inputs.port}");
+        let provided = BTreeMap::from([(InputId("branch".to_string()), "feature/x".to_string())]);
+        let resolved = resolve_inputs(&spec, &provided).unwrap();
+        let values = substitute_all(&spec, &resolved).unwrap();
+        assert_eq!(values.0["tasks.server.waitFor.port"], "3000");
+        assert_eq!(values.0["tasks.server.waitFor.host"], "127.0.0.1");
+    }
+
+    #[test]
+    fn tcp_port_template_resolving_to_non_port_is_rejected() {
+        for template in ["${inputs.branch}", "${worktree.path}", "0"] {
+            let spec = spec_with_tcp_port(template);
+            let provided =
+                BTreeMap::from([(InputId("branch".to_string()), "feature/x".to_string())]);
+            let resolved = resolve_inputs(&spec, &provided).unwrap();
+            assert!(
+                matches!(
+                    substitute_all(&spec, &resolved),
+                    Err(ValidateError::InvalidTcpPort { .. })
+                ),
+                "{template}"
+            );
+        }
     }
 }

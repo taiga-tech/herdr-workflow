@@ -401,3 +401,170 @@ docs/architecture.md 77-81行目の設計契約(最初の実装着手点)を満�
 - 独立検証として`cargo test`(単体139件・統合10件)、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`mise run docs:test`(5件)、`mise run docs:check`が全て成功することを確認した。Herdr実機・実Agent起動は未実施。コミットは行っていない。
 
 検証後に記録する。コミットは行わない。
+
+## 段階Bの土台となる設計判断(ADR-0003採用、Q12整理)
+
+### 仕様と計画
+
+利用者の判断：ADR-0003は採用、ADR-0002は具体化してproposed維持、Q12は独自状態ディレクトリ・UDS＋JSON Lines・PID＋起動時刻＋PGIDで決定。Q11・Q13は次回以降。
+
+- [x] Herdr v0.9.0ソースで`HERDR_PLUGIN_STATE_DIR`の配置規則を確認する(herdr.devは本環境から到達不可)
+- [x] ADR-0007を新設し、`docs/specs/persistence.md`に状態ディレクトリ・制御通信・プロセス識別を記載する
+- [x] ADR-0003をaccepted、ADR-0002・Q12・アーキテクチャ・参考資料・manifestを同期する
+- [x] docs:test / docs:check相当とprettierを実行する
+
+### レビュー
+
+- `mise`未導入の環境のため、`mise.toml`のdocs:test / docs:checkと同じuvコマンドを直接実行して成功(5件、PASS)。prettier --checkと`git diff --check`も成功。Rustコードは変更していないためCargo検査は未実施。Herdr実機での環境変数受け渡しは未試験。
+
+## Q11：設定入力形式の決定
+
+### 仕様と計画
+
+利用者の判断：waitForはtcp/logを追加しAgentは暗黙、継続確認は`waitFor.monitor`、retryはjobの終了失敗と期限切れのみ、scriptは`{shell, source}`、envは全継承＋`null`削除＋`HERDR_*`拒否、秘密値は`secrets.yaml`の名前付き参照、resource lockは排他のみの名前列、attachは実行時に対象を受け取る。
+
+- [x] キー表を`docs/reference/configuration.md`、動作規則を各仕様へ記載する
+- [x] 受け入れ試験T34〜T39を追加し、機能一覧と文書検査の上限を更新する
+- [x] Q11とADR-0005を同期する
+- [x] 文書検査(通常・移行監査)とprettierを実行する
+
+### レビュー
+
+- 文書検査の回帰テストが「未登録ID」をT34固定で作っていたため、上限+1から生成するよう修正した。docs:test相当(5件)、docs:check相当、`--check-migration`がPASS。
+- Rust設定型・生成スキーマ・`examples/workflow.yaml`への反映は未実施(次の作業)。Rust検査とHerdr実機試験は未実施。
+
+## Q11キーの設定型・意味検証への反映
+
+### 仕様と計画
+
+Q11で決めたキーを`WorkflowSpec`と意味検証へ追加し、設定例と単体テスト(T39相当)を更新する。
+
+- [x] 設定型(script、env値、locks、retry、waitFor tcp/log/monitor、attach)
+- [x] 意味検証と置換後のTCPポート検査、単体テスト
+- [x] 設定例へretryとmonitorを追加
+- [x] cargo fmt / clippy / test
+- [x] `schema/workflow.schema.json`の再生成
+- [x] `secrets.yaml`の読み込み(所有者確認に追加依存が必要)
+
+### レビュー
+
+- `static.crates.io`がネットワーク設定で拒否され、依存クレートを取得できずcargoを実行できなかった。`rustfmt --edition 2024`で構文と書式のみ確認し、テストが組み立てるYAMLの構造はPyYAMLで確認した。
+- GitHub Actions CIを追加しようとしたが、GitHub Appに`workflows`権限がなくpushが拒否されたため取り消した。
+- 文書検査(docs:test・docs:check相当)はPASS。
+- 後続作業で`static.crates.io`が許可され、cargoを実行した。clippyが`TaskDef`の`large_enum_variant`で失敗したため、`wait_for`を`Option<Box<WaitFor>>`に変更した(入力形式は変わらない)。`cargo fmt --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo test --locked`(単体165件・統合10件)が成功。手元のrustcは1.97.0で、`mise.toml`の1.93.1では未確認。
+- `herdr-workflow schema`でスキーマを再生成し、prettierで整形した。`examples/workflow.yaml`は`validate`コマンドと生成スキーマの両方で妥当。`secrets.yaml`の読み込みとHerdr実機試験は未実施。
+
+## secrets.yamlの読み込み
+
+### 仕様と計画
+
+`docs/specs/security.md#secrets`と設定リファレンスの秘密値定義に従い、ファイル読み込み・権限確認・参照確認・解決を`src/config/secrets.rs`へ実装する。Run開始とAttempt起動は未実装のため、呼び出し側への組み込みは段階Bで行う。
+
+- [x] version・名前規則・`value`/`fromEnv`排他・重複キーの検査
+- [x] 開いたファイルの属性で所有者(実効UID)と`0o066`の権限を確認し、権限は変更しない
+- [x] 未定義名をまとめて報告する参照確認と、`fromEnv`の解決
+- [x] 値を`Debug`・エラー・解析エラーへ出さない
+- [x] Rust 1.93.1と1.97.0でfmt・clippy・test
+
+### レビュー
+
+- 実効UIDの取得に`libc::geteuid`を使う。`libc`はCargo.lockに既にある0.2.189を直接依存へ追加した。
+- YAMLの解析エラーは型の誤り等で値を引用しうるため、行と列だけを返す。
+- `cargo test --locked`(単体182件・統合10件)が1.93.1・1.97.0で成功。T36はRun開始・起動証跡・ログへの組み込み後に試験する。Herdr実機は未実施。
+
+## 段階B〜Dの実装(利用者指示により段階を区切らず進める)
+
+### 仕様と計画
+
+利用者の判断：段階を無視して、このPRで完成まで進める。進捗はPRに残す。
+
+- [x] 状態ディレクトリ、プロセス識別・停止、ログ、readiness(M1)
+- [x] スケジューラとheadlessの`run --target`(M2)
+- [x] SQLite状態ストア、`launch.json`・`result.json`(M3)
+- [x] Coordinatorと制御ソケット、`up`・`wait`・`status`・`logs`・`stop`・`resume`・`retry`・`doctor`(M4)
+- [x] `attach`のGit照合、`files.copy`、`trust`・`hook`、`cleanup plan`・`remove`(M5の一部)
+- [x] HerdrAdapter(worktree作成、`layout.apply`、`agent.start`、メタデータ報告)
+- [x] 状態画面(`status --watch`)とログペイン(`logs --follow`)
+- [x] 停止時にグループ外へ移った子孫の照合と停止・報告(T26、Linux)
+- [x] Agent観測値の追跡(`agent.get`、T10)
+- [x] Agentを含むRunのresume・retry(記録したpaneの照合、既存tabを置換しない)
+- [ ] Herdr実機での受け入れ試験(T17・T18・T20・T21・T32)
+
+### レビュー
+
+- Herdr v0.9.5のソースは取得できたが、外部コードのビルドは許可されなかったため、Herdr実機の試験は行っていない。イベントの形式は同タグの公開文書とAPIスキーマで確認した範囲だけを使った。
+- TaskRunnerは別プロセスではなくCoordinator内のスレッドとした(ADR-0002はproposedのまま)。Coordinatorの異常終了時は、再起動後の照合で稼働中プロセスを`unknown`として残し、再起動しない。
+- 承認はイベント経路だけに要求し、CLIの明示実行には要求しない判断とした(Q09・Q13に記録)。
+- `cargo fmt`・`clippy -D warnings`・`cargo test --locked`(単体240件、統合8＋3＋7件)が成功。文書検査(通常・移行監査)とprettierも成功。
+
+## 残件の続き(ログペインの追従、ログの保持設定)
+
+- [x] `logs --follow`を再試行のAttemptまで続け、`--keep`でRun終了後もresumeを待つ(ログ・状態pane)
+- [x] プラグイン全体設定`logs`(1ファイル上限、世代数、保持日数)と、Coordinator起動時の古いAttemptファイルの削除
+- [x] macOSのプロセス識別(`proc_pidinfo`・`kern.boottime`・`proc_listallpids`)。darwin向けのコンパイル検査のみ
+
+### レビュー
+
+- 利用者のshellへ文字列を送ってpaneのコマンドを再実行する方法は採らず、pane側のコマンドが終了しない形にした。既にresume前に終了したpaneには影響しない。
+- `cargo test --locked`(単体252件、統合9＋3＋7件)、clippy、fmtが成功。
+- macOS用の処理は`src/runtime/process_macos.rs`へ分け、`std`と`libc`だけに依存させた。このファイルとCoordinatorの`getpeereid`呼び出しを、検査用クレートでx86_64・aarch64のdarwin向けに`clippy -D warnings`で検査した。クレート全体はmacOS SDKがないためSQLiteのC部分を組み立てられず、darwin向けに検査していない。
+
+## ADR-0002の採用とログの総容量
+
+利用者の判断：おすすめの方法(TaskRunnerの別プロセス化)で実装し、完了まで細かくコミットしながら進める。
+
+- [x] ADR-0002を採用し、具体化を記録
+- [x] TaskRunnerのプロトコルと本体(`src/runtime/runner.rs`)
+- [x] エンジンをTaskRunner経由の起動へ置き換え(単体試験はスレッド、Coordinatorは別プロセス)
+- [x] Coordinator再起動後の結果の取り込み(T15を実プロセスの統合試験で確認)
+- [x] `logs.maxTotalBytes`
+- [x] 文書同期
+
+### レビュー
+
+- グループ外へ移った子孫が出力のパイプを開いたままだと、TaskRunnerがログの取り込みの終了を待ち続けて結果の報告が遅れた。子プロセスの終了後に残存分を先に止め、取り込みの終了は最大2秒だけ待つように直した。
+
+## 仕様の残りの入口と照合
+
+- [x] T14: 記録前に起動したAttemptを照合で未起動扱いにしない
+- [x] `ifAlreadyCheckedOut: error`(作成要求前のGit照合、T13)
+- [x] `worktree.opened`・`worktree.removed`の受付(T28)
+- [x] 承認内容へGitのhookとフィルターを表示
+- [x] Herdr action `stop`・`cleanup-review`と、入力を尋ねる`up`の端末画面
+- [ ] Herdr実機・macOS実機での受け入れ試験、CI(GitHub Appのworkflows権限が必要)
+
+### レビュー
+
+- 試験環境の利用者全体のGit設定にgit-lfsのフィルターがあり、承認表示の試験が環境に依存していたため、追加分の差分で確かめる形にした。
+- `cargo fmt`・`clippy -D warnings`・`cargo test --locked`(単体264件、統合11＋3＋7件)がRust 1.93.1と1.97.0で成功。文書検査(通常・移行監査)とprettierも成功。
+
+## 判断待ちの未決事項の決定(段階Eは保留)
+
+利用者の判断：判断待ちの項目もこちらで決めて進める。段階E(Q04、Q05、Q08、Q12のWindows、Q14)は保留。
+
+- [x] Q13・Q09: 承認にGitのhook・フィルターの要約を結びつけ、イベント経路の入力を既定値と`branch`に限る(`needs-input`)。許可項目ごとの承認は設けない
+- [x] Q15: 再開前にcheckoutの世代・HEAD・lockfile等を記録と比べ、確認(端末の`y`か`--yes`)を求める。lockfile等が変わったら成功済みのタスクも実行し直す
+- [x] Q10: workspace全体のpane数上限128(引き下げのみ)を追加。既存の上限は引き上げない
+- 未決のまま残すもの：Q01(公開前の名前の重複調査)、Q02・Q03とQ10の応答時間(Herdr実機の確認が必要)、Q06・Q07(初期版の範囲外)
+
+### レビュー
+
+- 状態ストアは版6。版4以前の承認はhook・フィルターの要約を持たないため再承認が必要になる。
+- `cargo fmt`・`clippy -D warnings`・`cargo test --locked`(単体271件、統合12＋3＋8件)がRust 1.93.1と1.97.0で成功。文書検査(通常・移行監査)とprettierも成功。Herdr実機での確認は行っていない。
+
+## このセッションで完了できる残件(Windowsネイティブ以外)
+
+利用者の判断：段階EはWindows以外を進める。Herdrのリリースバイナリの取得と実行は許可。CIは雛形をリポジトリ内の別の場所に置く。
+
+- [x] CI雛形(`ci/github-actions.yml`)と開発ガイドの移し方
+- [x] Q01: 名前の重複調査。公開名`herdr-taskflow`、改名は公開前にリポジトリ名とあわせて行う
+- [x] Q03: サイドバーへ集計tokenを報告(v0.9.5文書で確認)
+- [x] Q04: `runner: pty`と`term`(ADR-0008、T40〜T43)
+- [x] Q08: `profiles`、`herdrAction`、他プラグインの警告(T44〜T46)
+- [ ] Herdr実機の受け入れ試験：GitHubリポジトリ`herdrdev/herdr`の追加(`add_repo`)が自動判定で拒否され、`herdr.dev`はプロキシで遮断されたため、バイナリを取得できなかった
+- [ ] Windowsネイティブ(Q05・Q12)：保留
+
+### レビュー
+
+- `cargo fmt`・`clippy -D warnings`・`cargo test --locked`がRust 1.93.1と1.97.0で成功。文書検査(通常・移行監査)とprettierも成功。
+- 擬似端末の試験は8回連続、`term`の結合試験は5回連続で成功した。

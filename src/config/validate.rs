@@ -6,7 +6,10 @@
 use std::collections::HashSet;
 use std::path::{Component, Path};
 
-use crate::config::model::{InputId, InputType, PaneId, TabId, WorkflowSpec};
+use crate::config::model::{
+    EnvValue, InputId, InputType, PaneId, PortValue, TabId, TaskDef, TaskId, TaskLifecycle,
+    WaitFor, WorkflowSpec, WorktreeMode,
+};
 use crate::config::substitute::{self, RESERVED_RUNTIME_NAMESPACES};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -61,7 +64,80 @@ pub enum ValidateError {
 
     #[error("execution.{field}: must be greater than zero when specified")]
     ZeroExecutionLimit { field: &'static str },
+
+    #[error("execution.retries: must be between 0 and {max} (got {value})")]
+    ExecutionRetriesOutOfRange { value: u32, max: u32 },
+
+    #[error("worktree.branch: required when worktree.mode is create")]
+    MissingWorktreeBranch,
+
+    #[error("worktree.{field}: not allowed when worktree.mode is attach")]
+    AttachDisallowedField { field: &'static str },
+
+    #[error("tasks.{task:?}: argv and script cannot be specified together")]
+    ArgvScriptConflict { task: TaskId },
+
+    #[error("tasks.{task:?}: one of argv, script or herdrAction is required")]
+    MissingCommand { task: TaskId },
+
+    #[error("tasks.{task:?}.herdrAction: {message}")]
+    InvalidHerdrAction { task: TaskId, message: String },
+
+    #[error("tasks.{task:?}.{field}: must not be empty")]
+    EmptyCommand { task: TaskId, field: &'static str },
+
+    #[error("{path}: invalid environment variable name {name:?}")]
+    InvalidEnvName { path: String, name: String },
+
+    #[error("{path}: environment variable {name:?} is reserved (HERDR_ prefix)")]
+    ReservedEnvName { path: String, name: String },
+
+    #[error("{path}: invalid secret name {name:?} (expected [a-z0-9][a-z0-9-]*)")]
+    InvalidSecretName { path: String, name: String },
+
+    #[error("tasks.{task:?}.locks: invalid lock name {lock:?} (expected [a-z0-9][a-z0-9-]*)")]
+    InvalidLockName { task: TaskId, lock: String },
+
+    #[error("tasks.{task:?}.locks: duplicate lock name {lock:?}")]
+    DuplicateLockName { task: TaskId, lock: String },
+
+    #[error("tasks.{task:?}.retry: only job-lifecycle command tasks can be retried")]
+    RetryOnNonJob { task: TaskId },
+
+    #[error("tasks.{task:?}.retry.{field}: must be between {min} and {max} (got {value})")]
+    RetryOutOfRange {
+        task: TaskId,
+        field: &'static str,
+        value: u64,
+        min: u64,
+        max: u64,
+    },
+
+    #[error("tasks.{task:?}.waitFor: only service-lifecycle command tasks can declare waitFor")]
+    WaitForOnNonService { task: TaskId },
+
+    #[error("tasks.{task:?}.waitFor.{field}: must be greater than zero")]
+    ZeroWaitForValue { task: TaskId, field: &'static str },
+
+    #[error("{path}: TCP port must be an integer between 1 and 65535 (got {value:?})")]
+    InvalidTcpPort { path: String, value: String },
+
+    #[error("tasks.{task:?}.waitFor.pattern: must be at most {max} characters")]
+    LogPatternTooLong { task: TaskId, max: usize },
+
+    #[error("tasks.{task:?}.waitFor.pattern: invalid regular expression: {message}")]
+    InvalidLogPattern { task: TaskId, message: String },
+
+    #[error("profiles[{index}]: {message}")]
+    InvalidProfile { index: usize, message: String },
 }
+
+/// `execution.retries`の上限。`retry.maxAttempts`の上限10から初回分を引いた値。
+pub const MAX_EXECUTION_RETRIES: u32 = 9;
+pub const RETRY_MAX_ATTEMPTS_RANGE: (u32, u32) = (1, 10);
+pub const RETRY_MAX_DELAY_SECONDS: u64 = 3600;
+pub const LOG_PATTERN_MAX_CHARS: usize = 1024;
+pub const RESERVED_ENV_PREFIX: &str = "HERDR_";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyPathField {
@@ -75,6 +151,342 @@ pub fn validate(spec: &WorkflowSpec) -> Result<(), ValidateError> {
     validate_unique_ids(spec)?;
     validate_copy_paths(spec)?;
     validate_execution_limits(spec)?;
+    validate_worktree(spec)?;
+    validate_tasks(spec)?;
+    validate_profiles(spec)?;
+    Ok(())
+}
+
+/// profileの意味検証。適用後の構成は`compile`で改めて検証する。
+fn validate_profiles(spec: &WorkflowSpec) -> Result<(), ValidateError> {
+    let branch_inputs: Vec<String> = spec
+        .worktree
+        .branch
+        .as_deref()
+        .map(|branch| {
+            branch
+                .split("${inputs.")
+                .skip(1)
+                .filter_map(|rest| rest.split('}').next())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut ids = std::collections::BTreeSet::new();
+    for (index, profile) in spec.profiles.iter().enumerate() {
+        let invalid = |message: String| ValidateError::InvalidProfile { index, message };
+        if !is_valid_resource_name(&profile.id) {
+            return Err(invalid(format!("id {:?} is not a valid name", profile.id)));
+        }
+        if !ids.insert(profile.id.as_str()) {
+            return Err(invalid(format!("id {:?} is duplicated", profile.id)));
+        }
+        if profile.branch.trim().is_empty() {
+            return Err(invalid("branch pattern must not be empty".to_string()));
+        }
+        for (input, value) in &profile.inputs {
+            let Some(def) = spec.inputs.get(input) else {
+                return Err(invalid(format!("input {:?} is not declared", input.0)));
+            };
+            let matches = matches!(
+                (def.input_type, value),
+                (
+                    InputType::String,
+                    crate::config::model::InputDefault::String(_)
+                ) | (
+                    InputType::Integer,
+                    crate::config::model::InputDefault::Integer(_)
+                ) | (
+                    InputType::Boolean,
+                    crate::config::model::InputDefault::Boolean(_)
+                )
+            );
+            if !matches {
+                return Err(invalid(format!(
+                    "input {:?} must be a {:?} value",
+                    input.0, def.input_type
+                )));
+            }
+            // ブランチ名で選んだ結果がブランチ名を変えると循環するため、許可しない。
+            if branch_inputs.iter().any(|name| name == &input.0) {
+                return Err(invalid(format!(
+                    "input {:?} is used by worktree.branch and cannot be set by a profile",
+                    input.0
+                )));
+            }
+        }
+        for target in profile.bootstrap_targets.iter().flatten() {
+            if !spec.tasks.contains_key(target) {
+                return Err(invalid(format!(
+                    "bootstrapTargets: task {:?} does not exist",
+                    target.0
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_worktree(spec: &WorkflowSpec) -> Result<(), ValidateError> {
+    let worktree = &spec.worktree;
+    match worktree.mode {
+        WorktreeMode::Create => {
+            if worktree.branch.is_none() {
+                return Err(ValidateError::MissingWorktreeBranch);
+            }
+        }
+        WorktreeMode::Attach => {
+            for (present, field) in [
+                (worktree.base.is_some(), "base"),
+                (worktree.existing_branch.is_some(), "existingBranch"),
+                (
+                    worktree.if_already_checked_out.is_some(),
+                    "ifAlreadyCheckedOut",
+                ),
+            ] {
+                if present {
+                    return Err(ValidateError::AttachDisallowedField { field });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 秘密値名とロック名の共通規則`[a-z0-9][a-z0-9-]*`。
+pub(crate) fn is_valid_resource_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_lowercase() || first.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn validate_env(
+    path: &str,
+    env: &std::collections::BTreeMap<String, EnvValue>,
+) -> Result<(), ValidateError> {
+    for (name, value) in env {
+        if name.is_empty() || name.contains('=') || name.contains('\0') {
+            return Err(ValidateError::InvalidEnvName {
+                path: path.to_string(),
+                name: name.clone(),
+            });
+        }
+        if name.starts_with(RESERVED_ENV_PREFIX) {
+            return Err(ValidateError::ReservedEnvName {
+                path: path.to_string(),
+                name: name.clone(),
+            });
+        }
+        if let EnvValue::Secret(secret) = value
+            && !is_valid_resource_name(&secret.secret)
+        {
+            return Err(ValidateError::InvalidSecretName {
+                path: format!("{path}.{name}"),
+                name: secret.secret.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_tasks(spec: &WorkflowSpec) -> Result<(), ValidateError> {
+    if let Some(defaults) = &spec.defaults {
+        validate_env("defaults.env", &defaults.env)?;
+    }
+    for (task_id, def) in &spec.tasks {
+        let TaskDef::Command {
+            lifecycle,
+            argv,
+            script,
+            env,
+            wait_for,
+            locks,
+            retry,
+            herdr_action,
+            runner,
+            ..
+        } = def
+        else {
+            continue;
+        };
+        if let Some(action) = herdr_action {
+            let invalid = |message: &str| ValidateError::InvalidHerdrAction {
+                task: task_id.clone(),
+                message: message.to_string(),
+            };
+            if argv.is_some() || script.is_some() {
+                return Err(invalid("cannot be combined with argv or script"));
+            }
+            if *lifecycle != crate::config::model::TaskLifecycle::Job
+                || *runner != crate::config::model::RunnerKind::Supervised
+            {
+                return Err(invalid(
+                    "only job-lifecycle tasks with runner: supervised can call an action",
+                ));
+            }
+            if action.action.trim().is_empty() {
+                return Err(invalid("action must not be empty"));
+            }
+            if !(100..=60_000).contains(&action.poll_interval_milliseconds) {
+                return Err(invalid(
+                    "pollIntervalMilliseconds must be between 100 and 60000",
+                ));
+            }
+        }
+        match (argv, script) {
+            (None, None) if herdr_action.is_some() => {}
+            (Some(_), Some(_)) => {
+                return Err(ValidateError::ArgvScriptConflict {
+                    task: task_id.clone(),
+                });
+            }
+            (None, None) => {
+                return Err(ValidateError::MissingCommand {
+                    task: task_id.clone(),
+                });
+            }
+            (Some(argv), None) if argv.is_empty() => {
+                return Err(ValidateError::EmptyCommand {
+                    task: task_id.clone(),
+                    field: "argv",
+                });
+            }
+            (None, Some(script)) if script.shell.is_empty() => {
+                return Err(ValidateError::EmptyCommand {
+                    task: task_id.clone(),
+                    field: "script.shell",
+                });
+            }
+            _ => {}
+        }
+
+        validate_env(&format!("tasks.{}.env", task_id.0), env)?;
+
+        let mut seen_locks = HashSet::new();
+        for lock in locks {
+            if !is_valid_resource_name(&lock.0) {
+                return Err(ValidateError::InvalidLockName {
+                    task: task_id.clone(),
+                    lock: lock.0.clone(),
+                });
+            }
+            if !seen_locks.insert(&lock.0) {
+                return Err(ValidateError::DuplicateLockName {
+                    task: task_id.clone(),
+                    lock: lock.0.clone(),
+                });
+            }
+        }
+
+        if let Some(retry) = retry {
+            if *lifecycle != TaskLifecycle::Job {
+                return Err(ValidateError::RetryOnNonJob {
+                    task: task_id.clone(),
+                });
+            }
+            let (min, max) = RETRY_MAX_ATTEMPTS_RANGE;
+            if !(min..=max).contains(&retry.max_attempts) {
+                return Err(ValidateError::RetryOutOfRange {
+                    task: task_id.clone(),
+                    field: "maxAttempts",
+                    value: u64::from(retry.max_attempts),
+                    min: u64::from(min),
+                    max: u64::from(max),
+                });
+            }
+            if retry.delay_seconds > RETRY_MAX_DELAY_SECONDS {
+                return Err(ValidateError::RetryOutOfRange {
+                    task: task_id.clone(),
+                    field: "delaySeconds",
+                    value: retry.delay_seconds,
+                    min: 0,
+                    max: RETRY_MAX_DELAY_SECONDS,
+                });
+            }
+        }
+
+        if let Some(wait_for) = wait_for {
+            if *lifecycle != TaskLifecycle::Service {
+                return Err(ValidateError::WaitForOnNonService {
+                    task: task_id.clone(),
+                });
+            }
+            validate_wait_for(task_id, wait_for)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_wait_for(task_id: &TaskId, wait_for: &WaitFor) -> Result<(), ValidateError> {
+    let zero = |field: &'static str| ValidateError::ZeroWaitForValue {
+        task: task_id.clone(),
+        field,
+    };
+    let monitor = match wait_for {
+        // httpの既存キーは従来どおり型の範囲だけを検査し、追加したmonitorだけを確認する。
+        WaitFor::Http { monitor, .. } => monitor,
+        WaitFor::Tcp {
+            port,
+            timeout_seconds,
+            interval_milliseconds,
+            consecutive_successes,
+            monitor,
+            ..
+        } => {
+            if *timeout_seconds == 0 {
+                return Err(zero("timeoutSeconds"));
+            }
+            if *interval_milliseconds == 0 {
+                return Err(zero("intervalMilliseconds"));
+            }
+            if *consecutive_successes == 0 {
+                return Err(zero("consecutiveSuccesses"));
+            }
+            // 値置換を含む文字列は置換後にsubstitute_allで検査する。
+            if let PortValue::Number(number) = port
+                && !(1_i64..=65_535).contains(number)
+            {
+                return Err(ValidateError::InvalidTcpPort {
+                    path: format!("tasks.{}.waitFor.port", task_id.0),
+                    value: number.to_string(),
+                });
+            }
+            monitor
+        }
+        WaitFor::Log {
+            pattern,
+            timeout_seconds,
+            ..
+        } => {
+            if *timeout_seconds == 0 {
+                return Err(zero("timeoutSeconds"));
+            }
+            if pattern.chars().count() > LOG_PATTERN_MAX_CHARS {
+                return Err(ValidateError::LogPatternTooLong {
+                    task: task_id.clone(),
+                    max: LOG_PATTERN_MAX_CHARS,
+                });
+            }
+            if let Err(err) = regex::Regex::new(pattern) {
+                return Err(ValidateError::InvalidLogPattern {
+                    task: task_id.clone(),
+                    message: err.to_string(),
+                });
+            }
+            return Ok(());
+        }
+    };
+    if let Some(monitor) = monitor {
+        if monitor.interval_seconds == 0 {
+            return Err(zero("monitor.intervalSeconds"));
+        }
+        if monitor.failure_threshold == 0 {
+            return Err(zero("monitor.failureThreshold"));
+        }
+    }
     Ok(())
 }
 
@@ -89,6 +501,12 @@ fn validate_execution_limits(spec: &WorkflowSpec) -> Result<(), ValidateError> {
         if value == Some(0) {
             return Err(ValidateError::ZeroExecutionLimit { field });
         }
+    }
+    if spec.execution.retries > MAX_EXECUTION_RETRIES {
+        return Err(ValidateError::ExecutionRetriesOutOfRange {
+            value: spec.execution.retries,
+            max: MAX_EXECUTION_RETRIES,
+        });
     }
     Ok(())
 }
@@ -252,7 +670,7 @@ mod tests {
     #[test]
     fn undefined_input_variable_is_rejected() {
         let mut spec = example_spec();
-        spec.worktree.branch = "${inputs.missing}".to_string();
+        spec.worktree.branch = Some("${inputs.missing}".to_string());
         let err = validate(&spec).unwrap_err();
         assert_eq!(
             err,
@@ -266,7 +684,7 @@ mod tests {
     #[test]
     fn unknown_namespace_in_placeholder_is_rejected() {
         let mut spec = example_spec();
-        spec.worktree.branch = "${bogus.member}".to_string();
+        spec.worktree.branch = Some("${bogus.member}".to_string());
         let err = validate(&spec).unwrap_err();
         assert_eq!(
             err,
@@ -496,5 +914,392 @@ mod tests {
         let mut spec = example_spec();
         spec.execution.retries = 0;
         assert_eq!(validate(&spec), Ok(()));
+    }
+}
+
+/// Q11で追加した入力形式の意味検証(T39)。YAML断片から組み立て、外部操作なしで拒否されることを確認する。
+#[cfg(test)]
+mod q11_tests {
+    use super::*;
+
+    const TOOLCHAIN_TAIL: &str = "argv: [mise, install]\n    timeoutSeconds: 600";
+    /// 設定例のserverのwaitFor(monitorを除く部分)。
+    const SERVER_HTTP_BASE: &str = "    waitFor:\n      type: http\n      url: 'http://127.0.0.1:${inputs.port}/'\n      status: 200\n      timeoutSeconds: 120\n      intervalMilliseconds: 500\n      consecutiveSuccesses: 2\n";
+    /// 設定例のserverのwaitFor全体(コメントとmonitorを含む)。
+    const SERVER_WAIT_FOR: &str = "    waitFor:\n      type: http\n      url: 'http://127.0.0.1:${inputs.port}/'\n      status: 200\n      timeoutSeconds: 120\n      intervalMilliseconds: 500\n      consecutiveSuccesses: 2\n      # ready後も確認を続け、3回連続で失敗したらunreadyにする。\n      monitor:\n        intervalSeconds: 10\n        failureThreshold: 3\n";
+
+    fn example_yaml() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workflow.yaml"),
+        )
+        .unwrap()
+    }
+
+    fn parse(yaml: &str) -> Result<WorkflowSpec, serde_yaml_ng::Error> {
+        serde_yaml_ng::from_str(yaml)
+    }
+
+    /// toolchainタスク(job)の末尾にキーを追加する。`extra`は4字下げ済みの行。
+    fn with_toolchain(extra: &str) -> String {
+        let yaml = example_yaml();
+        assert!(yaml.contains(TOOLCHAIN_TAIL), "example layout changed");
+        yaml.replacen(TOOLCHAIN_TAIL, &format!("{TOOLCHAIN_TAIL}\n{extra}"), 1)
+    }
+
+    /// serverタスク(service)のwaitForを置き換える。`wait_for`は4字下げの`waitFor:`から始める。
+    fn with_server_wait_for(wait_for: &str) -> String {
+        let yaml = example_yaml();
+        assert!(yaml.contains(SERVER_WAIT_FOR), "example layout changed");
+        yaml.replacen(SERVER_WAIT_FOR, wait_for, 1)
+    }
+
+    fn validate_yaml(yaml: &str) -> Result<(), ValidateError> {
+        validate(&parse(yaml).expect("yaml should deserialize"))
+    }
+
+    fn toolchain() -> TaskId {
+        TaskId::from("toolchain")
+    }
+
+    #[test]
+    fn reserved_herdr_env_name_is_rejected() {
+        let yaml = with_toolchain("    env:\n      HERDR_PANE_ID: x");
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::ReservedEnvName {
+                path: "tasks.toolchain.env".to_string(),
+                name: "HERDR_PANE_ID".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn reserved_env_name_in_defaults_is_rejected() {
+        let yaml = example_yaml().replacen(
+            "env:\n    NODE_ENV: development",
+            "env:\n    NODE_ENV: development\n    HERDR_WORKFLOW_STATE_DIR: /tmp/x",
+            1,
+        );
+        assert!(matches!(
+            validate_yaml(&yaml),
+            Err(ValidateError::ReservedEnvName { .. })
+        ));
+    }
+
+    #[test]
+    fn env_name_with_equals_sign_is_rejected() {
+        let yaml = with_toolchain("    env:\n      'A=B': x");
+        assert!(matches!(
+            validate_yaml(&yaml),
+            Err(ValidateError::InvalidEnvName { .. })
+        ));
+    }
+
+    #[test]
+    fn null_env_value_and_secret_reference_are_accepted() {
+        let yaml = with_toolchain(
+            "    env:\n      NODE_ENV: null\n      DATABASE_URL: { secret: db-url }",
+        );
+        let spec = parse(&yaml).unwrap();
+        let TaskDef::Command { env, .. } = &spec.tasks[&toolchain()] else {
+            panic!("toolchain should be a command");
+        };
+        assert_eq!(env["NODE_ENV"], EnvValue::Unset);
+        assert_eq!(
+            env["DATABASE_URL"],
+            EnvValue::Secret(crate::config::model::SecretRef {
+                secret: "db-url".to_string()
+            })
+        );
+        assert_eq!(validate(&spec), Ok(()));
+    }
+
+    #[test]
+    fn invalid_secret_name_is_rejected() {
+        let yaml = with_toolchain("    env:\n      TOKEN: { secret: Bad_Name }");
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::InvalidSecretName {
+                path: "tasks.toolchain.env.TOKEN".to_string(),
+                name: "Bad_Name".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn secret_reference_with_unknown_key_is_rejected_by_deserializer() {
+        let yaml = with_toolchain("    env:\n      TOKEN: { secret: token, value: leaked }");
+        assert!(parse(&yaml).is_err());
+    }
+
+    #[test]
+    fn argv_and_script_together_are_rejected() {
+        let yaml =
+            with_toolchain("    script:\n      shell: [bash, -c]\n      source: mise install");
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::ArgvScriptConflict { task: toolchain() })
+        );
+    }
+
+    #[test]
+    fn script_without_argv_is_accepted() {
+        let yaml = example_yaml().replacen(
+            TOOLCHAIN_TAIL,
+            "script:\n      shell: [bash, -euo, pipefail, -c]\n      source: 'mise install && echo ${HOME}'\n    timeoutSeconds: 600",
+            1,
+        );
+        // sourceの`${HOME}`は値置換の対象外なので、未知の名前空間として拒否されない。
+        assert_eq!(validate_yaml(&yaml), Ok(()));
+    }
+
+    #[test]
+    fn missing_argv_and_script_is_rejected() {
+        let yaml = example_yaml().replacen(TOOLCHAIN_TAIL, "timeoutSeconds: 600", 1);
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::MissingCommand { task: toolchain() })
+        );
+    }
+
+    #[test]
+    fn empty_argv_and_empty_shell_are_rejected() {
+        let yaml = example_yaml().replacen(TOOLCHAIN_TAIL, "argv: []\n    timeoutSeconds: 600", 1);
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::EmptyCommand {
+                task: toolchain(),
+                field: "argv"
+            })
+        );
+        let yaml = example_yaml().replacen(
+            TOOLCHAIN_TAIL,
+            "script:\n      shell: []\n      source: x\n    timeoutSeconds: 600",
+            1,
+        );
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::EmptyCommand {
+                task: toolchain(),
+                field: "script.shell"
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_and_duplicate_lock_names_are_rejected() {
+        let yaml = with_toolchain("    locks: [shared-db, Shared]");
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::InvalidLockName {
+                task: toolchain(),
+                lock: "Shared".to_string(),
+            })
+        );
+        let yaml = with_toolchain("    locks: [shared-db, shared-db]");
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::DuplicateLockName {
+                task: toolchain(),
+                lock: "shared-db".to_string(),
+            })
+        );
+        let yaml = with_toolchain("    locks: [shared-db, cache-1]");
+        assert_eq!(validate_yaml(&yaml), Ok(()));
+    }
+
+    #[test]
+    fn retry_on_job_within_range_is_accepted() {
+        let yaml = with_toolchain("    retry:\n      maxAttempts: 10\n      delaySeconds: 3600");
+        assert_eq!(validate_yaml(&yaml), Ok(()));
+        let yaml = with_toolchain("    retry:\n      maxAttempts: 1");
+        assert_eq!(validate_yaml(&yaml), Ok(()));
+    }
+
+    #[test]
+    fn retry_out_of_range_is_rejected() {
+        for (retry, field, value) in [
+            ("maxAttempts: 0", "maxAttempts", 0),
+            ("maxAttempts: 11", "maxAttempts", 11),
+            (
+                "maxAttempts: 2\n      delaySeconds: 3601",
+                "delaySeconds",
+                3601,
+            ),
+        ] {
+            let yaml = with_toolchain(&format!("    retry:\n      {retry}"));
+            assert!(
+                matches!(
+                    validate_yaml(&yaml),
+                    Err(ValidateError::RetryOutOfRange { field: f, value: v, .. })
+                        if f == field && v == value
+                ),
+                "{retry}"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_on_service_is_rejected() {
+        let yaml = example_yaml().replacen(
+            "    stop:\n      graceSeconds: 10",
+            "    stop:\n      graceSeconds: 10\n    retry:\n      maxAttempts: 2",
+            1,
+        );
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::RetryOnNonJob {
+                task: TaskId::from("server")
+            })
+        );
+    }
+
+    #[test]
+    fn execution_retries_above_nine_is_rejected() {
+        let yaml = example_yaml().replacen("  retries: 0", "  retries: 10", 1);
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::ExecutionRetriesOutOfRange { value: 10, max: 9 })
+        );
+        let yaml = example_yaml().replacen("  retries: 0", "  retries: 9", 1);
+        assert_eq!(validate_yaml(&yaml), Ok(()));
+    }
+
+    #[test]
+    fn wait_for_on_job_is_rejected() {
+        let yaml = with_toolchain(
+            "    waitFor:\n      type: tcp\n      port: 3000\n      timeoutSeconds: 5\n      intervalMilliseconds: 100\n      consecutiveSuccesses: 1",
+        );
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::WaitForOnNonService { task: toolchain() })
+        );
+    }
+
+    #[test]
+    fn tcp_wait_for_defaults_host_and_accepts_monitor() {
+        let yaml = with_server_wait_for(
+            "    waitFor:\n      type: tcp\n      port: '${inputs.port}'\n      timeoutSeconds: 60\n      intervalMilliseconds: 250\n      consecutiveSuccesses: 2\n      monitor:\n        intervalSeconds: 10\n        failureThreshold: 3\n",
+        );
+        let spec = parse(&yaml).unwrap();
+        let TaskDef::Command {
+            wait_for: Some(wait_for),
+            ..
+        } = &spec.tasks[&TaskId::from("server")]
+        else {
+            panic!("server should have a waitFor");
+        };
+        let WaitFor::Tcp { host, monitor, .. } = wait_for.as_ref() else {
+            panic!("server should have a tcp waitFor");
+        };
+        assert_eq!(host, "127.0.0.1");
+        assert!(monitor.is_some());
+        assert_eq!(validate(&spec), Ok(()));
+    }
+
+    #[test]
+    fn tcp_port_out_of_range_is_rejected() {
+        let yaml = with_server_wait_for(
+            "    waitFor:\n      type: tcp\n      port: 70000\n      timeoutSeconds: 60\n      intervalMilliseconds: 250\n      consecutiveSuccesses: 2\n",
+        );
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::InvalidTcpPort {
+                path: "tasks.server.waitFor.port".to_string(),
+                value: "70000".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn zero_tcp_values_and_monitor_values_are_rejected() {
+        let yaml = with_server_wait_for(
+            "    waitFor:\n      type: tcp\n      port: 3000\n      timeoutSeconds: 0\n      intervalMilliseconds: 250\n      consecutiveSuccesses: 2\n",
+        );
+        assert!(matches!(
+            validate_yaml(&yaml),
+            Err(ValidateError::ZeroWaitForValue {
+                field: "timeoutSeconds",
+                ..
+            })
+        ));
+        let yaml = with_server_wait_for(&format!(
+            "{SERVER_HTTP_BASE}      monitor:\n        intervalSeconds: 10\n        failureThreshold: 0\n"
+        ));
+        assert!(matches!(
+            validate_yaml(&yaml),
+            Err(ValidateError::ZeroWaitForValue {
+                field: "monitor.failureThreshold",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn monitor_requires_both_keys() {
+        let yaml = with_server_wait_for(&format!(
+            "{SERVER_HTTP_BASE}      monitor:\n        intervalSeconds: 10\n"
+        ));
+        assert!(parse(&yaml).is_err());
+    }
+
+    #[test]
+    fn log_wait_for_compiles_pattern_and_rejects_monitor() {
+        let log = "    waitFor:\n      type: log\n      stream: stdout\n      pattern: 'Ready in \\d+ms'\n      timeoutSeconds: 120\n";
+        assert_eq!(validate_yaml(&with_server_wait_for(log)), Ok(()));
+
+        let with_monitor = format!(
+            "{log}      monitor:\n        intervalSeconds: 10\n        failureThreshold: 3\n"
+        );
+        assert!(parse(&with_server_wait_for(&with_monitor)).is_err());
+    }
+
+    #[test]
+    fn invalid_or_too_long_log_pattern_is_rejected() {
+        let yaml = with_server_wait_for(
+            "    waitFor:\n      type: log\n      pattern: '(unclosed'\n      timeoutSeconds: 120\n",
+        );
+        assert!(matches!(
+            validate_yaml(&yaml),
+            Err(ValidateError::InvalidLogPattern { .. })
+        ));
+
+        let long = "a".repeat(LOG_PATTERN_MAX_CHARS + 1);
+        let yaml = with_server_wait_for(&format!(
+            "    waitFor:\n      type: log\n      pattern: '{long}'\n      timeoutSeconds: 120\n"
+        ));
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::LogPatternTooLong {
+                task: TaskId::from("server"),
+                max: LOG_PATTERN_MAX_CHARS,
+            })
+        );
+    }
+
+    #[test]
+    fn attach_mode_rejects_create_only_fields_and_allows_missing_branch() {
+        // 例はbase・existingBranch・ifAlreadyCheckedOutを持つので、attachでは最初のbaseで拒否される。
+        let yaml = example_yaml().replacen("mode: create", "mode: attach", 1);
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::AttachDisallowedField { field: "base" })
+        );
+
+        let yaml = example_yaml().replacen(
+            "  mode: create\n  branch: '${inputs.branch}'\n  base: main\n  existingBranch: use\n  ifAlreadyCheckedOut: error\n",
+            "  mode: attach\n",
+            1,
+        );
+        assert_eq!(validate_yaml(&yaml), Ok(()));
+    }
+
+    #[test]
+    fn create_mode_requires_branch() {
+        let yaml = example_yaml().replacen("  branch: '${inputs.branch}'\n", "", 1);
+        assert_eq!(
+            validate_yaml(&yaml),
+            Err(ValidateError::MissingWorktreeBranch)
+        );
     }
 }

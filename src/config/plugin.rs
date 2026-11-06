@@ -13,6 +13,14 @@ pub const DEFAULT_MAX_GRID_DIMENSION: u32 = 64;
 pub const MAX_CONFIGURABLE_GRID_DIMENSION: u32 = 64;
 pub const DEFAULT_MAX_PANES_PER_TAB: u32 = 32;
 pub const MAX_CONFIGURABLE_PANES_PER_TAB: u32 = 32;
+/// workspace全体(全tabの合計)のpane数。Herdrへの配置要求の総量を抑える(Q10)。
+pub const DEFAULT_MAX_PANES_PER_WORKSPACE: u32 = 128;
+pub const MAX_CONFIGURABLE_PANES_PER_WORKSPACE: u32 = 128;
+pub const MIN_LOG_FILE_BYTES: u64 = 1024 * 1024;
+pub const MAX_LOG_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_RETENTION_DAYS: u32 = 3650;
+pub const MIN_LOG_TOTAL_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_LOG_TOTAL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "RawPluginConfig", rename_all = "camelCase")]
@@ -20,6 +28,8 @@ pub struct PluginConfig {
     version: u32,
     #[serde(default)]
     limits: LimitsConfig,
+    #[serde(default)]
+    logs: LogsConfig,
 }
 
 impl PluginConfig {
@@ -32,6 +42,35 @@ impl PluginConfig {
     pub fn max_panes_per_tab(&self) -> u32 {
         self.limits.layout.max_panes_per_tab
     }
+
+    #[must_use]
+    pub fn max_panes_per_workspace(&self) -> u32 {
+        self.limits.layout.max_panes_per_workspace
+    }
+
+    /// Attemptのログ1ファイルの上限(バイト)。
+    #[must_use]
+    pub fn log_max_file_bytes(&self) -> u64 {
+        self.logs.max_file_bytes
+    }
+
+    /// ログの世代数(現在のファイルを含む)。
+    #[must_use]
+    pub fn log_generations(&self) -> u32 {
+        self.logs.generations
+    }
+
+    /// 終了したRunのAttemptファイルの合計の上限(バイト)。`None`は上限なし。
+    #[must_use]
+    pub fn log_max_total_bytes(&self) -> Option<u64> {
+        self.logs.max_total_bytes
+    }
+
+    /// 終了したRunのログを残す日数。`None`は削除しない。
+    #[must_use]
+    pub fn log_retention_days(&self) -> Option<u32> {
+        self.logs.retention_days
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +79,8 @@ struct RawPluginConfig {
     version: u32,
     #[serde(default)]
     limits: LimitsConfig,
+    #[serde(default)]
+    logs: LogsConfig,
 }
 
 impl TryFrom<RawPluginConfig> for PluginConfig {
@@ -63,9 +104,42 @@ impl TryFrom<RawPluginConfig> for PluginConfig {
                 max: MAX_CONFIGURABLE_PANES_PER_TAB,
             });
         }
+        let value = raw.limits.layout.max_panes_per_workspace;
+        if !(1..=MAX_CONFIGURABLE_PANES_PER_WORKSPACE).contains(&value) {
+            return Err(PluginConfigError::InvalidMaxPanesPerWorkspace {
+                value,
+                max: MAX_CONFIGURABLE_PANES_PER_WORKSPACE,
+            });
+        }
+        let logs = &raw.logs;
+        if !(MIN_LOG_FILE_BYTES..=MAX_LOG_FILE_BYTES).contains(&logs.max_file_bytes) {
+            return Err(PluginConfigError::InvalidLogFileBytes {
+                value: logs.max_file_bytes,
+            });
+        }
+        if !(1..=crate::runtime::logs::MAX_GENERATIONS).contains(&logs.generations) {
+            return Err(PluginConfigError::InvalidLogGenerations {
+                value: logs.generations,
+                max: crate::runtime::logs::MAX_GENERATIONS,
+            });
+        }
+        if let Some(days) = logs.retention_days
+            && !(1..=MAX_RETENTION_DAYS).contains(&days)
+        {
+            return Err(PluginConfigError::InvalidRetentionDays {
+                value: days,
+                max: MAX_RETENTION_DAYS,
+            });
+        }
+        if let Some(total) = logs.max_total_bytes
+            && !(MIN_LOG_TOTAL_BYTES..=MAX_LOG_TOTAL_BYTES).contains(&total)
+        {
+            return Err(PluginConfigError::InvalidLogTotalBytes { value: total });
+        }
         Ok(Self {
             version: raw.version,
             limits: raw.limits,
+            logs: raw.logs,
         })
     }
 }
@@ -75,6 +149,30 @@ impl Default for PluginConfig {
         Self {
             version: 1,
             limits: LimitsConfig::default(),
+            logs: LogsConfig::default(),
+        }
+    }
+}
+
+/// Attemptログの大きさと保持(docs/specs/observability.md「ログ形式」)。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct LogsConfig {
+    max_file_bytes: u64,
+    generations: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retention_days: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_total_bytes: Option<u64>,
+}
+
+impl Default for LogsConfig {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: crate::runtime::logs::DEFAULT_MAX_BYTES,
+            generations: crate::runtime::logs::DEFAULT_GENERATIONS,
+            retention_days: None,
+            max_total_bytes: None,
         }
     }
 }
@@ -90,6 +188,7 @@ struct LimitsConfig {
 struct LayoutLimits {
     max_grid_dimension: u32,
     max_panes_per_tab: u32,
+    max_panes_per_workspace: u32,
 }
 
 impl Default for LayoutLimits {
@@ -97,6 +196,7 @@ impl Default for LayoutLimits {
         Self {
             max_grid_dimension: DEFAULT_MAX_GRID_DIMENSION,
             max_panes_per_tab: DEFAULT_MAX_PANES_PER_TAB,
+            max_panes_per_workspace: DEFAULT_MAX_PANES_PER_WORKSPACE,
         }
     }
 }
@@ -123,6 +223,16 @@ pub enum PluginConfigError {
     InvalidMaxGridDimension { value: u32, max: u32 },
     #[error("limits.layout.maxPanesPerTab must be between 1 and {max}, got {value}")]
     InvalidMaxPanesPerTab { value: u32, max: u32 },
+    #[error("limits.layout.maxPanesPerWorkspace must be between 1 and {max}, got {value}")]
+    InvalidMaxPanesPerWorkspace { value: u32, max: u32 },
+    #[error("logs.maxFileBytes must be between 1 MiB and 1 GiB, got {value}")]
+    InvalidLogFileBytes { value: u64 },
+    #[error("logs.generations must be between 1 and {max}, got {value}")]
+    InvalidLogGenerations { value: u32, max: u32 },
+    #[error("logs.maxTotalBytes must be between 10 MiB and 1 TiB, got {value}")]
+    InvalidLogTotalBytes { value: u64 },
+    #[error("logs.retentionDays must be between 1 and {max}, got {value}")]
+    InvalidRetentionDays { value: u32, max: u32 },
 }
 
 pub fn load_str(yaml: &str) -> Result<PluginConfig, PluginConfigError> {
@@ -221,6 +331,44 @@ mod tests {
     }
 
     #[test]
+    fn log_settings_are_loaded_and_validated() {
+        let config = load_str(
+            "version: 1\nlogs:\n  maxFileBytes: 2097152\n  generations: 3\n  retentionDays: 14\n",
+        )
+        .unwrap();
+        assert_eq!(config.log_max_file_bytes(), 2_097_152);
+        assert_eq!(config.log_generations(), 3);
+        assert_eq!(config.log_retention_days(), Some(14));
+        let defaults = PluginConfig::default();
+        assert_eq!(defaults.log_max_file_bytes(), 20 * 1024 * 1024);
+        assert_eq!(defaults.log_generations(), 5);
+        assert_eq!(defaults.log_retention_days(), None);
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  maxFileBytes: 1000\n"),
+            Err(PluginConfigError::InvalidLogFileBytes { .. })
+        ));
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  generations: 0\n"),
+            Err(PluginConfigError::InvalidLogGenerations { .. })
+        ));
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  retentionDays: 0\n"),
+            Err(PluginConfigError::InvalidRetentionDays { .. })
+        ));
+        assert!(load_str("version: 1\nlogs:\n  unknown: 1\n").is_err());
+        assert_eq!(
+            load_str("version: 1\nlogs:\n  maxTotalBytes: 104857600\n")
+                .unwrap()
+                .log_max_total_bytes(),
+            Some(104_857_600)
+        );
+        assert!(matches!(
+            load_str("version: 1\nlogs:\n  maxTotalBytes: 1024\n"),
+            Err(PluginConfigError::InvalidLogTotalBytes { .. })
+        ));
+    }
+
+    #[test]
     fn zero_grid_limit_is_rejected() {
         let err = load_str("version: 1\nlimits:\n  layout:\n    maxGridDimension: 0\n")
             .expect_err("zero limit must fail");
@@ -238,6 +386,25 @@ mod tests {
             err,
             PluginConfigError::InvalidMaxPanesPerTab { value: 0, .. }
         ));
+    }
+
+    #[test]
+    fn workspace_pane_limit_can_only_be_lowered() {
+        let config = load_str("version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: 8\n")
+            .expect("lowered workspace limit should load");
+        assert_eq!(config.max_panes_per_workspace(), 8);
+        assert_eq!(
+            PluginConfig::default().max_panes_per_workspace(),
+            DEFAULT_MAX_PANES_PER_WORKSPACE
+        );
+        for value in [0, MAX_CONFIGURABLE_PANES_PER_WORKSPACE + 1] {
+            let yaml =
+                format!("version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: {value}\n");
+            assert!(matches!(
+                load_str(&yaml),
+                Err(PluginConfigError::InvalidMaxPanesPerWorkspace { .. })
+            ));
+        }
     }
 
     #[test]

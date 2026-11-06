@@ -10,6 +10,22 @@ updated: '2026-09-12'
 
 [文書目次](docs/README.md) · [更新ルール](docs/maintenance.md)
 
+## 未リリース
+
+非対話実行を追加した。`run --target`、`up`、`attach`、`wait`、`status`、`logs`、`stop`、`resume`、`retry`、`cleanup plan`、`remove`(借用checkoutは削除しない)、`trust`、`hook`、`doctor`を使える。Coordinatorは状態ディレクトリごとに一つ自動起動し、SQLiteの状態ストアとUnix domain socketの制御通信を使う。`up --herdr`では、Herdrでworktreeを作成し、初期化後にtab・paneを配置してAgentを起動する(Herdr実機では未試験)。Agentの観測値(`idle`・`working`等)を追跡して状態画面に表示する。Herdr連携のRunも`resume`・`retry`でき、配置済みの画面は作り直さない。ログ・状態paneはresume後の新しいAttemptも表示し続ける。プラグイン全体設定`logs`でログの大きさ、世代数、保持日数、総容量を設定できる。TaskRunnerをAttemptごとの別プロセスにし、Coordinatorが異常終了しても実行中のタスクを止めず、再起動後に結果を取り込む。
+
+承認の成立条件(Q13)と粒度(Q09)を決めた。承認にはGitのhook・フィルターの一覧の要約も記録し、一覧が変わったら再承認を求める。イベント経路では既定値のない必須入力を推測せず`needs-input`で保留する。状態ストアは版5になり、版4以前の承認は再承認が必要になる。
+
+`resume`・`retry`の前に、Run開始時からのlockfile等の変更、checkoutの作り直し、設定ファイルの変更、Herdrのpaneの欠損を調べ、確認を求めるようにした(Q15)。端末では`y`で続け、それ以外は`--yes`を使う。lockfile等が変わっていれば成功済みのタスクも実行し直す。状態ストアは版6になる。
+
+プラグイン全体設定に`limits.layout.maxPanesPerWorkspace`(既定値兼安全上限128)を追加し、全tabのpane数の合計を配置前に制限する(Q10)。
+
+Herdr連携のRunは、集計値(`flow_state`・`flow_running`・`flow_failed`・`flow_progress`)をworkspaceのtokenとして変化のたびに報告する。HerdrのSpace sidebar行に`$flow_state`等を書くと表示できる(Q03)。
+
+対話コマンド用の`runner: pty`と、端末として接続する`term`を追加した(Q04、ADR-0008)。キー入力、Ctrl+C、端末サイズの変更が子プロセスへ届き、切り離しても子プロセスは止まらない。Herdr連携では対話タスクのログpaneが端末になる。
+
+ブランチ名で構成を選ぶ`profiles`と、他のHerdrプラグインのactionを実行して実行記録で完了を確かめる`herdrAction`を追加した(Q08)。`doctor`は同じworktreeイベントに反応する他のプラグインを警告する。
+
 ## 文書版0.2 — 2026-09-12
 
 固有の仕様を持たない旧設計書パスの案内と、移管時の一回限りの検査結果を削除した。元資料と移行表は監査用に維持し、誤って整形されていた元資料を記録済みの原本へ復元した。

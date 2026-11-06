@@ -3,7 +3,7 @@ id: GUIDE-DEVELOPMENT
 title: '開発環境と配布'
 status: draft
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-11-06'
 ---
 
 # 開発環境と配布
@@ -20,22 +20,23 @@ updated: '2026-09-14'
 
 以下は依存候補と担当範囲である。実装着手時に利用版、MSRV、license、security advisory、ビルド対象の整合を確認し、`Cargo.lock`へ固定する。この文書では未確認の「最新版番号」を記載しない。
 
-| 担当                          | 候補                                                    |
-| ----------------------------- | ------------------------------------------------------- |
-| 非同期処理、通信、プロセス    | `tokio`                                                 |
-| キャンセルと入出力補助        | `tokio-util`                                            |
-| 設定型、JSON                  | `serde`、`serde_json`                                   |
-| YAML                          | `serde-saphyr` [S6](../reference/sources.md#s6)         |
-| CLI引数                       | `clap`                                                  |
-| 依存グラフ、循環検出          | `petgraph` [S12](../reference/sources.md#s12)           |
-| HTTP readiness                | `reqwest`                                               |
-| ログパターン                  | `regex`                                                 |
-| 構造化ログ                    | `tracing`、`tracing-subscriber`                         |
-| 型付きエラー、CLI最上位エラー | `thiserror`、`anyhow`                                   |
-| 状態ストア                    | `rusqlite` [S13](../reference/sources.md#s13)           |
-| 端末画面                      | `ratatui`、`crossterm`                                  |
-| OS別のプロセス制御            | Unix用APIとWindows用APIを別moduleに隔離                 |
-| スキーマ出力                  | `schemars`を採用。`herdr-workflow schema`コマンドで生成 |
+| 担当                          | 候補                                                         |
+| ----------------------------- | ------------------------------------------------------------ |
+| 非同期処理、通信、プロセス    | `tokio`(未採用。現在はOSスレッドと`std::process`)            |
+| キャンセルと入出力補助        | `tokio-util`                                                 |
+| 設定型、JSON                  | `serde`、`serde_json`                                        |
+| YAML                          | `serde-saphyr` [S6](../reference/sources.md#s6)              |
+| CLI引数                       | `clap`                                                       |
+| 依存グラフ、循環検出          | `petgraph` [S12](../reference/sources.md#s12)                |
+| HTTP readiness                | `reqwest`(未採用。現在はloopback向けの最小HTTP/1.1実装)      |
+| ログパターン                  | `regex`                                                      |
+| 構造化ログ                    | `tracing`、`tracing-subscriber`                              |
+| 型付きエラー、CLI最上位エラー | `thiserror`、`anyhow`                                        |
+| 状態ストア                    | `rusqlite`(bundled)を採用 [S13](../reference/sources.md#s13) |
+| Unixのプロセス・信号・ロック  | `libc`を採用(`killpg`、`waitid`、`flock`、`geteuid`等)       |
+| 端末画面                      | `ratatui`、`crossterm`                                       |
+| OS別のプロセス制御            | Unix用APIとWindows用APIを別moduleに隔離                      |
+| スキーマ出力                  | `schemars`を採用。`herdr-workflow schema`コマンドで生成      |
 
 非同期処理の中でSQLiteの同期処理を長時間実行しない。専用の書き込み処理へ要求を送り、トランザクションを短く保つ。
 
@@ -69,7 +70,7 @@ Windowsネイティブは、Herdr側でもWindows向け機能の対応状況が�
 
 ## 検査
 
-上記のcargoコマンドはこのリポジトリで直接実行できる。実装状況は`docs/repository-structure.md`の「現在の状態」で確認する。
+上記のcargoコマンドはこのリポジトリで直接実行できる。実行系の試験は実際の子プロセスを起動するため、`/bin/sh`、`git`、`python3`を必要とする。Coordinatorを使う統合試験(`tests/cli_runtime.rs`)はソケットパスの長さ上限に収まるよう`/tmp`直下に状態ディレクトリを作る。実装状況は`docs/repository-structure.md`の「現在の状態」で確認する。
 
 文書の検査はリポジトリルートで実行する。
 
@@ -81,6 +82,12 @@ mise run docs:check
 これらのmiseタスクは固定したuvからPythonスクリプトを実行し、追加Pythonパッケージを使わない。通常はMarkdownの相対リンク、明示アンカー、文書ID、受け入れ試験IDを検査する。`mise run docs:audit`を実行した場合だけ、章の移行先と保存した元資料のハッシュも検査する。Rustのビルド、Herdr通信、設定の意味検証は対象外である。
 
 CIでは文書検査と製品テストを別の結果として表示する。CIの権限やworkflowファイルは、対象リポジトリと必要権限を確認してから追加する。
+
+<a id="ci"></a>
+
+### CI
+
+GitHub Actionsの雛形を[ci/github-actions.yml](../../ci/github-actions.yml)に置く。このリポジトリのGitHub Appには`workflows`権限がないため、雛形は`.github/workflows/`の外にある。有効にするには、利用者が`.github/workflows/ci.yml`へ移してpushする。雛形はUbuntuとmacOSで`mise run rust:fmt`・`rust:clippy`・`rust:test`を、Ubuntuで文書検査とprettierを実行する。macOSのjobは、この開発環境で検査できないクレート全体のdarwinビルドとプロセス識別の試験を補う。
 
 ## 関連文書
 

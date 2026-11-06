@@ -20,7 +20,7 @@ updated: '2026-09-17'
 
 ### 座標と範囲
 
-`column`と`row`は1始まり、`colSpan`と`rowSpan`は正の整数とする。gridの`columns`と`rows`はそれぞれ1以上、プラグイン全体設定`limits.layout.maxGridDimension`以下とし、一つのtabのpane数は`limits.layout.maxPanesPerTab`以下とする。省略時および設定可能な安全上限はgrid各軸が64、pane数が32で、設定ではこれらを引き下げられるが引き上げられない。列幅と行高は等分を初期仕様とし、比率指定は後続の拡張に分ける。
+`column`と`row`は1始まり、`colSpan`と`rowSpan`は正の整数とする。gridの`columns`と`rows`はそれぞれ1以上、プラグイン全体設定`limits.layout.maxGridDimension`以下とし、一つのtabのpane数は`limits.layout.maxPanesPerTab`以下、全tabのpane数の合計は`limits.layout.maxPanesPerWorkspace`以下とする。省略時および設定可能な安全上限はgrid各軸が64、tabごとのpane数が32、workspace全体のpane数が128で、設定ではこれらを引き下げられるが引き上げられない。列幅と行高は等分を初期仕様とし、比率指定は後続の拡張に分ける。
 
 [設定例](../../examples/workflow.yaml)の配置は次のセル割り当てになる。
 

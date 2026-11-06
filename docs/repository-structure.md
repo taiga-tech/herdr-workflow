@@ -16,7 +16,7 @@ updated: '2026-09-16'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、workflow設定例とプラグイン全体設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、プラグイン全体設定の読み込み(`config/plugin.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`)が存在する。段階Aで技術的に実装可能な範囲は完了しており、`files.copy`の追跡済みファイル判定とHerdr接続以降のmoduleが段階B以降の対象として残る。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、workflow設定例とプラグイン全体設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、プラグイン全体設定の読み込み(`config/plugin.rs`)、秘密値定義の読み込みと参照確認(`config/secrets.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、非対話実行の`src/runtime/`、Coordinatorと制御通信(`src/coordinator.rs`)、実行系のCLI(`src/commands.rs`)、承認とイベント受付(`src/approval.rs`)、Herdr Socket APIの連携(`src/herdr.rs`)、CI雛形(`ci/github-actions.yml`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`・`tests/cli_runtime.rs`)が存在する。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -34,17 +34,22 @@ herdr-workflow/
 ├── skills-lock.json                外部スキルの導入元とハッシュ
 ├── Cargo.toml                      package定義と依存関係
 ├── Cargo.lock                      解決済み依存版の固定
-├── herdr-plugin.toml               validateアクションを登録するプラグインmanifest
+├── herdr-plugin.toml               action・worktreeイベント・`up`の端末画面を登録するmanifest
+├── ci/github-actions.yml           GitHub Actionsの雛形(`.github/workflows/`へ移して使う)
 ├── schema/
 │   └── workflow.schema.json        WorkflowSpecから生成したJSON Schema
 ├── src/
 │   ├── main.rs                     エントリポイント
 │   ├── lib.rs                      公開APIの起点
-│   ├── cli.rs                      validate/planサブコマンド
+│   ├── cli.rs                      validate/plan/schemaサブコマンド
+│   ├── commands.rs                 run/up/status等、Coordinatorを使うサブコマンド
+│   ├── coordinator.rs              Coordinatorと制御ソケット(JSON Lines)
+│   ├── approval.rs                 承認ハッシュとworktreeイベントの解釈
 │   ├── config/
 │   │   ├── model.rs                WorkflowSpec等の設定型
 │   │   ├── load.rs                 YAML読み込み
 │   │   ├── plugin.rs               プラグイン全体設定の読み込みと検証
+│   │   ├── secrets.rs              秘密値定義の読み込み・権限確認・参照解決
 │   │   ├── substitute.rs           値置換の検出・解決
 │   │   └── validate.rs             デシリアライズ後の意味検証
 │   ├── plan/
@@ -56,6 +61,22 @@ herdr-workflow/
 │   │   ├── schedule/
 │   │   │   └── tests.rs            scheduleのunit test
 │   │   └── layout.rs               gridから二分割木への変換と検証
+│   ├── runtime/
+│   │   ├── state_dir.rs            状態ディレクトリの決定と権限確認
+│   │   ├── process.rs              プロセスグループでの起動・識別・停止
+│   │   ├── process_macos.rs        macOSのプロセス情報(proc_pidinfo、kern.boottime)
+│   │   ├── runner.rs               TaskRunner(Attemptごとの別プロセス)と通信
+│   │   ├── logs.rs                 Attemptログ(JSON Lines、世代、マスク)
+│   │   ├── readiness.rs            HTTP・TCPの確認
+│   │   ├── locks.rs                resource lockとcheckout実行ロック
+│   │   ├── prepare.rs              起動定義と環境変数の組み立て
+│   │   ├── session.rs              Runの実行構成(対象選択、秘密値確認)
+│   │   ├── engine.rs               スケジューラ(engine/tests.rsは実プロセス試験)
+│   │   ├── store.rs                SQLiteの状態ストア
+│   │   ├── git.rs                  Git CLIによるcheckoutの照合
+│   │   ├── files.rs                files.copyの検査・実行・復旧
+│   │   ├── fingerprint.rs          再開前に比べるcheckoutの記録
+│   │   └── tty.rs                  対話コマンドの擬似端末と端末クライアント
 │   └── state/
 │       └── models.rs               TaskState、AttemptResult等
 ├── tests/
@@ -124,6 +145,7 @@ herdr-workflow/
 │   │   ├── model.rs
 │   │   ├── load.rs
 │   │   ├── plugin.rs               プラグイン全体設定の読み込みと検証
+│   │   ├── secrets.rs              秘密値定義の読み込み・権限確認・参照解決
 │   │   ├── substitute.rs           値置換の検出・解決
 │   │   └── validate.rs
 │   ├── plan/

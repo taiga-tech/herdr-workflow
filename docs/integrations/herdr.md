@@ -30,9 +30,20 @@ CLIを呼ぶ場合は、Herdrが渡した`HERDR_BIN_PATH`を優先する。直�
 
 詳細なTask一覧は、プラグインの端末画面を初期の表示先とする。
 
-Herdr側への補助表示には、公開メタデータAPIでworkspace単位の集計値を報告する案を採る。例は`flow_state`、`flow_failed`、`flow_running`である。表示に必要なHerdr設定の変更は案を提示し、利用者の設定を無断で書き換えない。
+<a id="sidebar-tokens"></a>
 
-通常コマンドをAgentと偽って登録しない。公開APIで任意のTask一覧を独立したサイドバーセクションとして追加できることは確認できていないため、その機能は本体拡張の検討事項として残す。既存のAgent表示条件を操作するAPIと、任意のUI追加を区別する。[S1](../reference/sources.md#s1)
+Herdr側への補助表示には、`workspace.report_metadata`でworkspace単位の集計値をtokenとして報告する([Q03](../planning/open-questions.md#q03))。Herdr連携のRunは、状態を保存するたびに集計し、値が変わったときだけ報告する。報告の失敗はRunの結果に影響させない。
+
+| token           | 値                                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------------- |
+| `flow_state`    | `queued`・`preparing`・`active`・`stopping`、終了後は`succeeded`・`failed`・`cancelled`・`unknown` |
+| `flow_running`  | 起動中・実行中のTask数                                                                             |
+| `flow_failed`   | 失敗・状態不明のTask数                                                                             |
+| `flow_progress` | `成功数/Task数`                                                                                    |
+
+Herdr v0.9.5の文書では、workspaceのtokenはSpace sidebar行に`$flow_state`のように書くと表示される。[S1](../reference/sources.md#s1) 表示に必要なHerdr設定は利用者が追加し、本プラグインは利用者の設定を書き換えない。tokenはHerdrの再起動後に復元されないため、次の状態変化で報告し直す。
+
+通常コマンドをAgentと偽って登録しない。v0.9.5の公開APIには任意のTask一覧を独立したサイドバー区画として追加する手段の記載がないため、詳細なTask一覧は端末画面で表示し、ネイティブの区画追加はHerdr本体への変更案として扱う。既存のAgent表示条件を操作するAPIと、任意のUI追加を区別する。[S1](../reference/sources.md#s1)
 
 ### 状態画面
 
@@ -52,6 +63,22 @@ developer     running     ready      observed: idle
 
 停止、再試行、ログ表示、該当ペインへの移動を提供する。破壊的操作は状態画面からも確認を経て実行する。接続先が応答しない場合は、最終確認時刻を表示して古い状態であることを区別する。
 
+<a id="implemented"></a>
+
+### 実装済みの連携
+
+`herdr-plugin.toml`に`[[events]]`で`worktree.created`・`worktree.opened`・`worktree.removed`を登録し、`herdr-workflow hook`が`HERDR_PLUGIN_EVENT`と`HERDR_PLUGIN_EVENT_JSON`を読む。イベントJSONからは`WorktreeInfo`(`path`、`branch`、`is_detached`、`is_linked_worktree`)だけを使い、外側の包み方には依存しない。この形式はHerdr v0.9.5タグの公開文書と`herdr-api.schema.json`、v0.9.0タグの文書で確認したものであり、実機でのイベント配送は試験していない。
+
+`up --herdr`(または`attach --herdr`)では、要求元の`HERDR_SOCKET_PATH`へ1行1要求のJSONで次のメソッドを送る(`src/herdr.rs`)。
+
+1. `worktree.mode: create`なら`worktree.create`(`cwd`、`branch`、`base`、`label`、`focus: false`)。応答の`workspace.workspace_id`と`worktree.path`を使い、workspaceを別途作らない。送る前に`pending:<repo>:<branch>`の受付記録を残し、このworktreeの`worktree.created`イベントでは別Runを開始しない(T12)。`attach`では要求元の`HERDR_WORKSPACE_ID`を使う。
+2. 初期化対象のjobが成功した後、設定のtabごとに`layout.apply`(`workspace_id`、`tab_label`、`focus: false`、`root`)を送る。`tab_id`は渡さず、既存のtabを置換しない。分割木の比率は`firstSpan / totalSpan`とする。ログpaneは`herdr-workflow logs RUN --task TASK --follow --keep`(`runner: pty`のタスクでは端末として接続する`herdr-workflow term RUN --task TASK --keep`、[対話コマンド](../specs/execution.md#interactive))、状態paneは`herdr-workflow status RUN --watch --keep`を`command`として起動し(Runの終了後も終えず、`resume`・`retry`の新しいAttemptを表示し続ける)、Shell・Agentのpaneはコマンドなしのshellとする。応答の`layout.root`の葉の順序で設定のpane IDとHerdrのpane IDを対応づける。
+3. Agent paneでは`agent.start`(`name`、`kind`、`pane_id`)を送る。プロンプトは送らない。Agentの依存先は初期化対象に限る。
+4. `workspace.report_metadata`で`flow_state`を報告する(失敗しても実行は続ける)。
+5. 起動したAgentごとに`agent.get`(`target`はAgent名)を一定間隔で送り、応答の`agent.agent_status`(`idle`・`working`・`blocked`・`done`・`unknown`)を観測値として記録する。エラーコードに`not_found`を含む応答はAgentの終了または置換とみなして追跡を終え、それ以外の失敗は観測値を`unknown`にする。照会間隔は既定2秒で、診断のために要求元の環境変数`HERDR_WORKFLOW_AGENT_POLL_MS`で変えられる。
+
+応答を失った変更要求は再送しない。これらの形式はHerdr v0.9.5タグの公開文書とAPIスキーマで確認したものであり、偽のHerdrソケットを使う試験(`src/herdr.rs`・`src/coordinator.rs`)で要求形を確認している。配置したpaneとAgentの対応は状態ストア(`runs.herdr_state`)へ記録し、`resume`・`retry`では`pane.get`と`agent.get`で照合してから使う([復旧](../specs/recovery.md#agent-resume))。Coordinatorを再起動すると、Agentタスクは追跡が切れたものとして`stopped`になり、`resume`で照合できれば追跡を再開する。Herdr実機での動作は未試験である。
+
 ## 互換性の記録
 
 対応下限は未決定。対象Herdr版、APIスキーマの取得結果、CLI/TUI双方のイベント発火、OS、試験日、結果を実装時に記録する。取得できない項目は未確認のまま残す。
@@ -60,7 +87,7 @@ developer     running     ready      observed: idle
 
 2026-09-16、稼働中のHerdr v0.9.0(Linux、client/serverともprotocol 22)について、既定設定、pane CLI、Socket APIスキーマを確認した。pane数を制限する公開設定、APIフィールド、配列の`maxItems`、上限超過エラーは確認できなかった。この結果はHerdr内部に実装上の限界が存在しないことを保証しないため、Herdr Workflow側でtabごとのpane数を32以下に制限し、上限変更時は対象Herdr版で実動作を測定する。
 
-任意Task一覧をネイティブサイドバーへ追加する機能は提供可能と断定しない。状態画面と集計メタデータの経路を先に検証する。
+任意Task一覧をネイティブサイドバーへ追加する機能は提供しない。状態画面と集計token([サイドバー](#sidebar-tokens))で代える。
 
 ## 関連文書
 
