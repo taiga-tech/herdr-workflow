@@ -74,6 +74,8 @@ struct Args {
     current: bool,
     /// 指定されていない入力を端末で尋ねる。
     interactive: bool,
+    /// `resume`・`retry`で検出した変更を確認済みとして続ける。
+    yes: bool,
     idle_exit: Option<u64>,
 }
 
@@ -128,6 +130,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--keep" => parsed.keep = true,
             "--current" => parsed.current = true,
             "--interactive" => parsed.interactive = true,
+            "--yes" => parsed.yes = true,
             other if other.starts_with("--") => return Err(format!("unknown flag {other:?}")),
             other => parsed.positional.push(other.to_string()),
         }
@@ -395,15 +398,69 @@ fn resume_main(state: &StateDir, args: &Args, retry_task: Option<String>) -> i32
         Ok(client) => client,
         Err(error) => return remote_exit(args.json, &error),
     };
-    let params = json!({
-        "runId": run_id,
-        "retryTask": retry_task,
-        "env": coordinator::current_env(),
-    });
-    if let Err(error) = client.call("run.resume", params) {
-        return remote_exit(args.json, &error);
+    let mut confirm = args.yes;
+    loop {
+        let params = json!({
+            "runId": run_id,
+            "retryTask": retry_task,
+            "env": coordinator::current_env(),
+            "confirm": confirm,
+        });
+        match client.call("run.resume", params) {
+            Ok(result) => {
+                // 確認の要らない変更(HEADの移動等)も表示する。
+                if !args.json {
+                    for change in result["changes"].as_array().into_iter().flatten() {
+                        eprintln!("changed: {}", change["detail"].as_str().unwrap_or_default());
+                    }
+                }
+                break;
+            }
+            Err(CoordinatorError::Remote { code, message }) if code == "needs-confirmation" => {
+                match confirm_changes(args, &message) {
+                    Some(true) => confirm = true,
+                    Some(false) => return EXIT_CANCELLED,
+                    None => return EXIT_NEEDS_APPROVAL,
+                }
+            }
+            Err(error) => return remote_exit(args.json, &error),
+        }
     }
     follow_run(state, &mut client, run_id, args.json)
+}
+
+/// 再開前に検出した変更を示して確認する(Q15)。端末がなければ`--yes`を案内して`None`。
+fn confirm_changes(args: &Args, changes: &str) -> Option<bool> {
+    use std::io::IsTerminal;
+    let interactive = !args.json && std::io::stdin().is_terminal();
+    if !interactive {
+        eprint_error(
+            args.json,
+            "needs-confirmation",
+            &format!(
+                "the checkout or Herdr layout changed since the run started:\n{changes}\nre-run with --yes to continue"
+            ),
+        );
+        return None;
+    }
+    eprintln!("the checkout or Herdr layout changed since the run started:\n{changes}");
+    Some(ask_yes_no(
+        &mut std::io::stdin().lock(),
+        &mut std::io::stderr(),
+        "continue? [y/N]: ",
+    ))
+}
+
+fn ask_yes_no(reader: &mut dyn std::io::BufRead, writer: &mut dyn Write, prompt: &str) -> bool {
+    if write!(writer, "{prompt}")
+        .and_then(|()| writer.flush())
+        .is_err()
+    {
+        return false;
+    }
+    let mut line = String::new();
+    reader.read_line(&mut line).is_ok()
+        && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn outcome_exit(outcome: RunOutcome) -> i32 {
@@ -1482,6 +1539,31 @@ mod tests {
     use crate::runtime::state_dir::test_support::TempDir;
 
     #[test]
+    fn only_an_explicit_yes_confirms_changes() {
+        let mut out = Vec::new();
+        for (answer, expected) in [
+            ("y\n", true),
+            ("YES\n", true),
+            ("\n", false),
+            ("n\n", false),
+            ("", false),
+        ] {
+            let mut reader = std::io::Cursor::new(answer.as_bytes());
+            assert_eq!(
+                ask_yes_no(&mut reader, &mut out, "continue? "),
+                expected,
+                "{answer:?}"
+            );
+        }
+        assert!(String::from_utf8(out).unwrap().starts_with("continue? "));
+        assert!(
+            parse(&["resume".to_string(), "r1".to_string(), "--yes".to_string()])
+                .unwrap()
+                .yes
+        );
+    }
+
+    #[test]
     fn runs_are_matched_to_the_current_herdr_workspace() {
         let tmp = TempDir::new("commands");
         let store = Store::open(&tmp.0.join("state.db")).unwrap();
@@ -1516,6 +1598,7 @@ mod tests {
                     plugin_config: String::new(),
                     owned_workspace: owned.map(str::to_string),
                     herdr_state: state,
+                    fingerprint: None,
                 })
                 .unwrap();
         }

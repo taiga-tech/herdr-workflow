@@ -212,6 +212,50 @@ fn retry_runs_a_new_attempt_without_repeating_succeeded_tasks() {
 }
 
 #[test]
+fn retry_after_lockfile_change_needs_confirmation_and_reruns_setup() {
+    // Q15: 端末のない再開は変更を示して終了コード3で止まり、--yesで成功済みの初期化から実行し直す。
+    let env = Env::new();
+    std::fs::write(env.root.join("work/pnpm-lock.yaml"), "v1").unwrap();
+    let config = env.write_workflow(
+        &[
+            job("setup", "echo x >> setup-count", ""),
+            job(
+                "flaky",
+                "if [ -f ok ]; then exit 0; fi; exit 1",
+                "    dependsOn:\n      - task: setup\n        condition: succeeded\n",
+            ),
+        ]
+        .concat(),
+        "setup",
+    );
+    let first = env.cli(&[
+        "run",
+        "--config",
+        path(&config),
+        "--target",
+        "flaky",
+        "--json",
+    ]);
+    assert_eq!(first.status.code(), Some(4));
+    let report: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    let run_id = report["run"]["runId"].as_str().unwrap().to_string();
+    std::fs::write(env.root.join("work/ok"), "").unwrap();
+    std::fs::write(env.root.join("work/pnpm-lock.yaml"), "v2").unwrap();
+
+    let held = env.cli(&["retry", &run_id, "--task", "flaky"]);
+    assert_eq!(held.status.code(), Some(3), "{held:?}");
+    let stderr = String::from_utf8_lossy(&held.stderr);
+    assert!(stderr.contains("pnpm-lock.yaml changed"), "{stderr}");
+    assert!(stderr.contains("--yes"), "{stderr}");
+    let count = || std::fs::read_to_string(env.root.join("work/setup-count")).unwrap();
+    assert_eq!(count(), "x\n");
+
+    let retry = env.cli(&["retry", &run_id, "--task", "flaky", "--yes", "--json"]);
+    assert_eq!(retry.status.code(), Some(0), "{retry:?}");
+    assert_eq!(count(), "x\nx\n");
+}
+
+#[test]
 fn attach_rejects_branch_mismatch_before_starting() {
     // T37: ブランチ不一致ではRunを開始しない。
     let env = Env::new();

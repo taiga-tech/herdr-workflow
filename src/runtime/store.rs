@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::engine::{Recorder, RunOutcome, RunPhase, RunSnapshot};
 use crate::runtime::logs;
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -53,6 +53,8 @@ pub struct RunRecord {
     pub owned_workspace: Option<String>,
     /// Herdr連携で配置したpaneとAgentの対応(JSON、`herdr::HerdrState`)。
     pub herdr_state: Option<String>,
+    /// Run開始時(再開後は再開時)のcheckoutの記録(JSON、`fingerprint::CheckoutFingerprint`)。
+    pub fingerprint: Option<String>,
 }
 
 pub struct Store {
@@ -193,6 +195,15 @@ impl Store {
                 COMMIT;",
             )?;
         }
+        if version < 6 {
+            // 版6: 再開時に比べるcheckoutの記録(Q15、`fingerprint::CheckoutFingerprint`)。
+            conn.execute_batch(
+                "BEGIN;
+                ALTER TABLE runs ADD COLUMN fingerprint TEXT;
+                PRAGMA user_version = 6;
+                COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -200,8 +211,8 @@ impl Store {
         self.conn.execute(
             "INSERT INTO runs (id, created_at, updated_at, plan_hash, config_path, checkout, target,
                 phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace,
-                herdr_state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                herdr_state, fingerprint)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 record.run_id,
                 record.created_at,
@@ -218,6 +229,7 @@ impl Store {
                 record.plugin_config,
                 record.owned_workspace,
                 record.herdr_state,
+                record.fingerprint,
             ],
         )?;
         Ok(())
@@ -279,6 +291,7 @@ impl Store {
                 plugin_config: row.get(12)?,
                 owned_workspace: row.get(13)?,
                 herdr_state: row.get(14)?,
+                fingerprint: row.get(15)?,
             },
             row.get(7)?,
             row.get(8)?,
@@ -292,7 +305,7 @@ impl Store {
         Ok(record)
     }
 
-    const RUN_COLUMNS: &'static str = "id, created_at, updated_at, plan_hash, config_path, checkout, target, phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace, herdr_state";
+    const RUN_COLUMNS: &'static str = "id, created_at, updated_at, plan_hash, config_path, checkout, target, phase, outcome, workflow, inputs, coordinator_pid, plugin_config, owned_workspace, herdr_state, fingerprint";
 
     pub fn run(&self, run_id: &str) -> Result<RunRecord, StoreError> {
         let raw = self
@@ -386,6 +399,15 @@ impl Store {
         self.conn.execute(
             "UPDATE runs SET herdr_state = ?2 WHERE id = ?1",
             params![run_id, state],
+        )?;
+        Ok(())
+    }
+
+    /// 承認を記録する。`side_effects`は承認時のGitのhook・フィルターの要約。
+    pub fn set_fingerprint(&self, run_id: &str, fingerprint: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE runs SET fingerprint = ?2 WHERE id = ?1",
+            params![run_id, fingerprint],
         )?;
         Ok(())
     }
@@ -523,6 +545,7 @@ mod tests {
             plugin_config: String::new(),
             owned_workspace: None,
             herdr_state: None,
+            fingerprint: None,
         }
     }
 

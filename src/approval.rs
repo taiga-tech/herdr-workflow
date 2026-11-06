@@ -225,17 +225,7 @@ pub fn parse_worktree_event(json: &str) -> Option<WorktreeEvent> {
 /// 中身の変更で変わるctimeやmtimeは使わない。
 #[must_use]
 pub fn acceptance_key(checkout: &Path, workflow: &str, config_hash: &str) -> String {
-    use std::os::unix::fs::MetadataExt;
-    let generation = std::fs::metadata(checkout)
-        .map(|metadata| {
-            let created = metadata
-                .created()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |duration| duration.as_nanos());
-            format!("{}:{}:{created}", metadata.dev(), metadata.ino())
-        })
-        .unwrap_or_default();
+    let generation = crate::runtime::fingerprint::checkout_generation(checkout);
     let mut hasher = Sha256::new();
     for part in [
         checkout.display().to_string().as_str(),

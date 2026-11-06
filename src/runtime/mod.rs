@@ -1,6 +1,7 @@
 //! 段階Bの非対話実行(Runner、readiness、ログ、状態ディレクトリ)。
 pub mod engine;
 pub mod files;
+pub mod fingerprint;
 pub mod git;
 pub mod locks;
 pub mod logs;

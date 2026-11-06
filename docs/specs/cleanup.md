@@ -30,7 +30,7 @@ paneを閉じる操作とservice停止を分ける。管理対象Agentのペイ�
 
 worktree削除は`remove`で明示する。`up --herdr`がHerdrへ作成を依頼したworktreeだけを所有として記録し、それ以外(`attach`やheadlessで使ったcheckout)は借用として削除しない。所有worktreeでも、Runが稼働中、状態不明のTaskがある、追跡ファイルの変更・未追跡ファイル・ignore対象ファイルがある、のいずれかなら削除しない。削除はHerdrの`worktree.remove`(`git worktree remove`を実行し、ブランチを残す)で行う。削除前に計画を表示し、対象パス、ブランチ、所有Run、稼働プロセス、追跡ファイルの変更、未追跡ファイル、ignore対象ファイルを確認する。
 
-`.env`等のignore対象ファイルも消えるため、通常の変更一覧に出ないことを理由に無変更と判断しない。確認後も削除直前に状態を読み直す。main worktree、借用したcheckout、識別が曖昧な対象は自動削除しない。
+`.env`等のignore対象ファイルも消えるため、通常の変更一覧に出ないことを理由に無変更と判断しない。確認後も削除直前に状態を読み直す。利用者の変更と削除が競合したときの確認の形式([Q15](../planning/open-questions.md#q15))は、`cleanup plan`での計画の表示とする。`remove`は保留理由が一つでもあれば削除せず、保留を無視する強制オプションは設けない。main worktree、借用したcheckout、識別が曖昧な対象は自動削除しない。
 
 Herdr側のworktree削除はブランチを残す仕様なので、ブランチ削除は別の確認操作とする。[S1](../reference/sources.md#s1) リモート参照が消えたという理由だけで、ローカルブランチがmerge済みと判断しない。
 

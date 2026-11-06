@@ -20,27 +20,27 @@ updated: '2026-09-17'
 
 この節の`herdr-workflow`コマンドは`draft`のCLI契約であり、実装済みの範囲はコードと試験結果で確認する。
 
-| コマンド                 | 操作                                                        |
-| ------------------------ | ----------------------------------------------------------- |
-| `validate`               | 構文、型、参照、DAG、gridの検証。コマンドは実行しない       |
-| `plan`                   | 作成、コピー、実行、配置を解決し、計画とハッシュを表示      |
-| `schema [--output PATH]` | `WorkflowSpec`のJSON Schemaを表示またはファイルへ出力       |
-| `trust`                  | 表示した設定と実行許可を承認する                            |
-| `up`                     | 新規worktree用Runを受け付け、Run IDを返す                   |
-| `attach --checkout PATH` | 明示した既存checkoutへ新しいRunを関連づける                 |
-| `run --target TASK`      | 対象タスクとその依存処理を実行し、対象の結果を待つ          |
-| `wait RUN --until ready` | 初期化、配置、選択した常駐タスクの準備を待つ                |
-| `status [RUN]`           | 実行状態、待機条件、失敗、最終確認時刻を表示                |
-| `logs RUN --task TASK`   | 指定タスクのログを表示                                      |
-| `stop RUN`               | 所有タスクを停止する。worktreeは残す                        |
-| `resume RUN`             | 保存済み計画と実状態を照合して再開する                      |
-| `retry RUN --task TASK`  | 指定タスクを新しいAttemptとして再試行する                   |
-| `cleanup plan RUN`       | 削除候補と保留理由を表示する                                |
-| `remove RUN`             | 確認済みの所有worktreeを削除する                            |
-| `doctor`                 | Herdr API、Git、mise、パス、通信、権限を検査する            |
-| `hook`                   | Herdrの`[[events]]`から呼ばれ、worktreeイベントを受け付ける |
-| `coordinator`            | Coordinatorを前面で起動する(通常はCLIが自動起動する)        |
-| `runner`                 | CoordinatorがAttemptごとに起動するTaskRunner(直接使わない)  |
+| コマンド                        | 操作                                                        |
+| ------------------------------- | ----------------------------------------------------------- |
+| `validate`                      | 構文、型、参照、DAG、gridの検証。コマンドは実行しない       |
+| `plan`                          | 作成、コピー、実行、配置を解決し、計画とハッシュを表示      |
+| `schema [--output PATH]`        | `WorkflowSpec`のJSON Schemaを表示またはファイルへ出力       |
+| `trust`                         | 表示した設定と実行許可を承認する                            |
+| `up`                            | 新規worktree用Runを受け付け、Run IDを返す                   |
+| `attach --checkout PATH`        | 明示した既存checkoutへ新しいRunを関連づける                 |
+| `run --target TASK`             | 対象タスクとその依存処理を実行し、対象の結果を待つ          |
+| `wait RUN --until ready`        | 初期化、配置、選択した常駐タスクの準備を待つ                |
+| `status [RUN]`                  | 実行状態、待機条件、失敗、最終確認時刻を表示                |
+| `logs RUN --task TASK`          | 指定タスクのログを表示                                      |
+| `stop RUN`                      | 所有タスクを停止する。worktreeは残す                        |
+| `resume RUN [--yes]`            | 保存済み計画と実状態を照合して再開する                      |
+| `retry RUN --task TASK [--yes]` | 指定タスクを新しいAttemptとして再試行する                   |
+| `cleanup plan RUN`              | 削除候補と保留理由を表示する                                |
+| `remove RUN`                    | 確認済みの所有worktreeを削除する                            |
+| `doctor`                        | Herdr API、Git、mise、パス、通信、権限を検査する            |
+| `hook`                          | Herdrの`[[events]]`から呼ばれ、worktreeイベントを受け付ける |
+| `coordinator`                   | Coordinatorを前面で起動する(通常はCLIが自動起動する)        |
+| `runner`                        | CoordinatorがAttemptごとに起動するTaskRunner(直接使わない)  |
 
 <a id="implemented"></a>
 
@@ -53,7 +53,7 @@ updated: '2026-09-17'
 - `up`は全タスクを対象とするRunを受け付けてRun IDだけを返す。`wait RUN --until ready|finished [--timeout 秒]`で待つ。`ready`は初期化が成功し、Runのserviceがすべて`running`かつ`ready`の状態を指す。
 - `logs RUN --task TASK [--attempt N] [--stream stdout|stderr] [--follow [--keep]]`は保存したログの表示用テキストを出し、`--json`では記録をそのまま出す。`--follow`は自動再試行の新しいAttemptも区切り行を付けて続けて表示し、Taskの結果が確定するかRunが終わると終える。`--keep`を付けるとRunの終了後も終えず、`resume`・`retry`の新しいAttemptを待つ。
 - `status`はAgentタスクの観測値(`observed: idle`等)も表示する。
-- `resume RUN`は停止・終了済みのRunを保存済みの計画で再開する。Agentタスクを含むRunと、Herdrで画面を配置したRunは、要求元の`HERDR_SOCKET_PATH`を使ってHerdr連携で再開する(動作規則は[復旧](../specs/recovery.md#agent-resume))。成功済みのTaskは繰り返さず、状態不明のTaskは起動しない。`retry RUN --task TASK`は指定タスクを新しいAttemptとして実行し、未成功の依存先も再実行する。
+- `resume RUN`は停止・終了済みのRunを保存済みの計画で再開する。Agentタスクを含むRunと、Herdrで画面を配置したRunは、要求元の`HERDR_SOCKET_PATH`を使ってHerdr連携で再開する(動作規則は[復旧](../specs/recovery.md#agent-resume))。成功済みのTaskは繰り返さず、状態不明のTaskは起動しない。`retry RUN --task TASK`は指定タスクを新しいAttemptとして実行し、未成功の依存先も再実行する。どちらも外部操作の前にRun開始時(前回の再開時)からの変更を調べ、lockfile等の変更、checkoutの作り直し、設定ファイルの変更、Herdrのpaneの欠損があれば一覧を示して確認を求める。端末では`y`で続け、端末がない場合は終了コード3で終える。`--yes`は確認済みとして続ける。lockfile等が変わっていれば成功済みのTaskも実行し直す(規則は[再開前の変更検出](../specs/recovery.md#resume-changes))。
 - `cleanup plan RUN`は対象checkout、ブランチ、追跡ファイルの変更、未追跡ファイル、ignore対象ファイル、稼働中の可能性があるTask、所有workspaceと保留理由を表示する。`remove RUN`は`up --herdr`が作成したworktreeだけを対象とし、保留理由が一つでもあれば何も削除せず終了コード4を返す。条件を満たす場合はHerdrの`worktree.remove`を呼び、ブランチは残す。`status RUN --watch [--keep]`は1秒ごとに再描画する状態画面であり、`--keep`ではRunの終了後も再描画を続ける。
 - `trust --config PATH`は承認内容(コマンド、コピー対象、Agent、環境変数名、秘密値名、ロック、HTTP確認先)を表示して承認を記録する。`hook`は承認済みの設定だけを初期化し、未承認、承認後のGitのhook・フィルターの変更、detached checkout、イベントから決められない必須入力では保留して終了コード3を返す(`holdReason`は`needs-approval`・`needs-branch`・`needs-input`)。動作規則は[承認と秘密情報](../specs/security.md#approval)を参照する。
 

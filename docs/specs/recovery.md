@@ -74,6 +74,22 @@ Herdr連携で配置したRunは、作成したworkspace、設定のpaneとHerdr
 
 初期版は、成功済みタスクを別Runへ横断して再利用するキャッシュを持たない。同じRun内で成功結果を使う場合も、設定、checkoutの同一性、出力や利用前提の変更を検査する。初期化後にlockfile等が変わった場合は成功済みという記録だけで省略しない。
 
+<a id="resume-changes"></a>
+
+### 再開前の変更検出
+
+Run開始時と再開時に、checkoutの世代(ディレクトリのdevice・inode・作成時刻)、HEAD、checkout直下の依存関係とツールの定義ファイル(`pnpm-lock.yaml`・`package-lock.json`・`yarn.lock`・`bun.lock`・`bun.lockb`・`Cargo.lock`・`go.sum`・`uv.lock`・`poetry.lock`・`Gemfile.lock`・`composer.lock`・`mise.toml`・`.mise.toml`・`mise.lock`・`.tool-versions`)の内容ハッシュを状態ストアへ記録する。`resume`と`retry`は外部操作の前に記録と現在を比べる([Q15](../planning/open-questions.md#q15))。
+
+| 変更                                     | 確認 | 再開時の扱い                                                                         |
+| ---------------------------------------- | ---- | ------------------------------------------------------------------------------------ |
+| checkoutが同じパスに作り直された         | 必要 | 成功済みのタスクも実行し直す                                                         |
+| 監視対象ファイルの変更・追加・削除       | 必要 | 成功済みのタスクも実行し直す                                                         |
+| workflow設定ファイルが記録した本文と違う | 必要 | 記録した設定で再開する。新しい設定を使うには新しいRunを開始する                      |
+| 記録したHerdrのpaneが見つからない        | 必要 | paneを作り直さない。そのpaneのAgentは失敗にする([T17](../testing/acceptance.md#t17)) |
+| HEADの移動                               | 不要 | 表示とイベント記録だけを行う。Agentの作業で日常的に起こるため                        |
+
+確認が必要な変更があると、Coordinatorは何も起動せず`needs-confirmation`で一覧を返す。CLIは一覧を表示し、端末から実行していれば`y`の入力で続ける。端末がない場合や`--json`では終了コード3で終え、`--yes`での再実行を案内する。状態不明のタスクは変更の有無にかかわらず再実行しない。確認して再開した時点の状態を新しい記録とし、次の再開ではそれと比べる。検出した変更はRunのイベントに残す。
+
 ## 関連文書
 
 [状態ストア](persistence.md) / [CLI](../reference/cli.md) / [運用手順](../guides/operations.md)

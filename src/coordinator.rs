@@ -28,7 +28,7 @@ use crate::runtime::process::{self, IdentityMatch};
 use crate::runtime::session::{self, RunRequest};
 use crate::runtime::state_dir::{self, StateDir};
 use crate::runtime::store::{RunRecord, Store, StoreRecorder};
-use crate::runtime::{engine, logs};
+use crate::runtime::{engine, fingerprint, logs};
 use crate::state::models::{AttemptOutcome, ReadinessState, TaskState};
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -244,6 +244,9 @@ struct ResumeParams {
     run_id: String,
     #[serde(default)]
     retry_task: Option<String>,
+    /// 検出した変更を利用者が確認済み(Q15)。
+    #[serde(default)]
+    confirm: bool,
     #[serde(default)]
     env: BTreeMap<String, String>,
 }
@@ -700,12 +703,18 @@ fn start_engine(shared: &Arc<Shared>, start: StartSpec) -> Result<Value, ErrorBo
     let mut record = start.record;
     record.plan_hash.clone_from(&prepared.plan_hash);
     record.checkout.clone_from(&prepared.checkout);
+    // 再開時に比べるcheckoutの記録(Q15)。再開では再開時点の状態で置き換える。
+    record.fingerprint =
+        serde_json::to_string(&crate::runtime::fingerprint::capture(&record.checkout)).ok();
     if start.is_new {
         store.insert_run(&record).map_err(|error| ErrorBody {
             code: "store".to_string(),
             message: error.to_string(),
         })?;
     } else {
+        if let Some(fingerprint) = &record.fingerprint {
+            let _ = store.set_fingerprint(&record.run_id, fingerprint);
+        }
         store
             .set_run_state(&record.run_id, RunPhase::Queued, RunOutcome::Pending)
             .map_err(|error| ErrorBody {
@@ -859,6 +868,7 @@ fn handle_start(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody>
         plugin_config: serde_json::to_string(&plugin_config).unwrap_or_default(),
         owned_workspace: None,
         herdr_state: None,
+        fingerprint: None,
     };
     start_engine(
         shared,
@@ -879,6 +889,46 @@ fn handle_start(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody>
 
 /// 保存済みの計画で再開する。成功済みのTaskは繰り返さず、状態不明のTaskは
 /// 明示した`retry`の対象でない限り起動しない(docs/specs/recovery.md)。
+/// 再開前に、Run開始時(前回の再開時)の記録と現在を比べる(docs/specs/recovery.md#resume-changes)。
+fn resume_changes(
+    record: &RunRecord,
+    herdr_resume: Option<&crate::herdr::HerdrState>,
+    env: &BTreeMap<String, String>,
+) -> Result<Vec<fingerprint::Change>, ErrorBody> {
+    let mut changes = record
+        .fingerprint
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<fingerprint::CheckoutFingerprint>(json).ok())
+        .map(|before| fingerprint::compare(&before, &fingerprint::capture(&record.checkout)))
+        .unwrap_or_default();
+    // 再開は記録した設定で行う。手元の設定が変わっていれば、使われないことを示す。
+    if let Ok(text) = std::fs::read_to_string(&record.config_path)
+        && text != record.workflow
+    {
+        changes.push(fingerprint::Change {
+            kind: fingerprint::ChangeKind::Config,
+            detail: format!(
+                "{} changed since the run started; resume keeps the recorded configuration (start a new run to use the new one)",
+                record.config_path.display()
+            ),
+        });
+    }
+    if let Some(state) = herdr_resume {
+        let mut client = crate::herdr::HerdrClient::from_env(env).map_err(herdr_error)?;
+        for (pane, id) in &state.panes {
+            if !crate::herdr::pane_exists(&mut client, id).map_err(herdr_error)? {
+                changes.push(fingerprint::Change {
+                    kind: fingerprint::ChangeKind::Pane,
+                    detail: format!(
+                        "pane {pane} ({id}) no longer exists; it is not re-created and agents placed there fail"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(changes)
+}
+
 fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody> {
     let params: ResumeParams = serde_json::from_value(params).map_err(|error| ErrorBody {
         code: "invalid-request".to_string(),
@@ -929,6 +979,36 @@ fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody
         .values()
         .any(|task| task.kind == engine::TaskKind::Agent);
     let herdr = has_agents || herdr_resume.is_some();
+    // 前回の記録から変わったものを示し、確認のない再開では外部操作をしない(Q15)。
+    let changes = resume_changes(&record, herdr_resume.as_ref(), &params.env)?;
+    let pending: Vec<&fingerprint::Change> = changes
+        .iter()
+        .filter(|change| change.kind.needs_confirmation())
+        .collect();
+    if !pending.is_empty() && !params.confirm {
+        return Err(ErrorBody {
+            code: "needs-confirmation".to_string(),
+            message: pending
+                .iter()
+                .map(|change| format!("- {}", change.detail))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        });
+    }
+    let rerun_succeeded = changes
+        .iter()
+        .any(|change| change.kind.invalidates_success());
+    if let Ok(store) = Store::open(&shared.state.db_path()) {
+        for change in &changes {
+            let _ = store.add_event(&record.run_id, &format!("resume: {}", change.detail));
+        }
+        if rerun_succeeded {
+            let _ = store.add_event(
+                &record.run_id,
+                "resume: succeeded tasks run again because checkout inputs changed",
+            );
+        }
+    }
     if let Some(task) = &retry_task
         && tasks
             .get(task)
@@ -972,7 +1052,7 @@ fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody
             initial.insert(id, (runtime, None));
             continue;
         }
-        let keep = runtime.state == TaskState::Succeeded && !retrying;
+        let keep = runtime.state == TaskState::Succeeded && !retrying && !rerun_succeeded;
         let unknown = runtime.state == TaskState::Unknown && !retrying;
         if keep || unknown {
             initial.insert(id, (runtime, snapshot.detail));
@@ -1001,6 +1081,10 @@ fn handle_resume(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody
             agent_plans,
         },
     )
+    .map(|mut result| {
+        result["changes"] = serde_json::to_value(&changes).unwrap_or_default();
+        result
+    })
 }
 
 fn handle_stop(shared: &Arc<Shared>, params: Value) -> Result<Value, ErrorBody> {
@@ -1907,8 +1991,21 @@ mod tests {
         assert_eq!(attempts.last().unwrap().attempt_id.0, 2);
 
         // 6. retry: 記録したpaneが消えていたら、そのpane IDでは操作しない(T17)。
+        // 欠けたpaneは再開前に示し、確認なしでは何も起動しない(Q15)。
         fake.missing_panes.lock().unwrap().push("w9:p2".to_string());
-        resume(&run_id, Some("developer")).unwrap();
+        let error = resume(&run_id, Some("developer")).unwrap_err();
+        assert_eq!(error.code, "needs-confirmation");
+        assert!(
+            error.message.contains("no longer exists"),
+            "{}",
+            error.message
+        );
+        assert_eq!(count("agent.start"), 2);
+        handle_resume(
+            &shared,
+            json!({ "runId": run_id, "retryTask": "developer", "env": env, "confirm": true }),
+        )
+        .unwrap();
         wait_until(&store, &run_id, done);
         assert_eq!(count("agent.start"), 2);
         assert_eq!(count("layout.apply"), 1);
@@ -1941,6 +2038,7 @@ mod tests {
             plugin_config: String::new(),
             owned_workspace: None,
             herdr_state: None,
+            fingerprint: None,
         };
         let finish = |store: &mut Store, id: &str, phase, outcome, at: &str| {
             store
@@ -2050,6 +2148,7 @@ mod tests {
                     plugin_config: String::new(),
                     owned_workspace: None,
                     herdr_state: None,
+                    fingerprint: None,
                 })
                 .unwrap();
             store
@@ -2099,6 +2198,7 @@ mod tests {
                 plugin_config: String::new(),
                 owned_workspace: None,
                 herdr_state: None,
+                fingerprint: None,
             })
             .unwrap();
         let waiting = |kind| engine::TaskSnapshot {
@@ -2214,6 +2314,85 @@ mod tests {
         // 作成要求を送らず、worktreeを増やさない。
         assert!(fake.methods().is_empty());
         let _ = std::fs::remove_file(socket);
+    }
+
+    #[test]
+    fn resume_shows_changes_and_reruns_succeeded_tasks_after_lockfile_change() {
+        // Q15: 成功済みという記録だけで、lockfileが変わった後の初期化を省略しない。
+        use crate::runtime::git::test_repo::init;
+        use crate::runtime::state_dir::test_support::TempDir;
+
+        let tmp = TempDir::new("coord-resume-changes");
+        let repo = init(&tmp.0.join("repo"));
+        std::fs::write(repo.join("pnpm-lock.yaml"), "v1").unwrap();
+        let workflow = "version: 1\nname: t\nworktree:\n  mode: attach\nbootstrap:\n  targets: [install]\ntasks:\n  install:\n    type: command\n    lifecycle: job\n    runner: supervised\n    argv: [/bin/sh, -c, 'echo x >> installs']\n  check:\n    type: command\n    lifecycle: job\n    runner: supervised\n    argv: [/bin/sh, -c, 'test -f go']\n    dependsOn: [{ task: install, condition: succeeded }]\nworkspace:\n  label: t\n  tabs:\n    - id: dev\n      label: dev\n      layout: { type: grid, columns: 1, rows: 1 }\n      panes:\n        - id: S\n          label: status\n          view: { type: status }\n          placement: { column: 1, row: 1 }\n";
+        let config = tmp.0.join("workflow.yaml");
+        std::fs::write(&config, workflow).unwrap();
+        let shared = Arc::new(Shared {
+            state: StateDir::open(tmp.0.join("state")).unwrap(),
+            runner: crate::runtime::runner::Launcher::Thread,
+            runs: Mutex::new(HashMap::new()),
+            last_activity: Mutex::new(Instant::now()),
+            shutdown: AtomicBool::new(false),
+        });
+        let store = Store::open(&shared.state.db_path()).unwrap();
+        let result = handle_start(
+            &shared,
+            json!({
+                "configPath": config, "workflow": workflow, "checkout": repo,
+                "target": null, "env": current_env(),
+            }),
+        )
+        .unwrap();
+        let run_id = result["runId"].as_str().unwrap().to_string();
+        wait_until(&store, &run_id, done);
+        assert_eq!(store.run(&run_id).unwrap().outcome, RunOutcome::Failed);
+        let installs = || std::fs::read_to_string(repo.join("installs")).unwrap();
+        assert_eq!(installs(), "x\n");
+        let resume = |confirm: bool| {
+            handle_resume(
+                &shared,
+                json!({ "runId": run_id, "env": current_env(), "confirm": confirm }),
+            )
+        };
+
+        // 変更がなければ確認なしで再開し、成功済みのinstallは実行しない。
+        std::fs::write(repo.join("go"), "").unwrap();
+        let result = resume(false).unwrap();
+        assert_eq!(result["changes"], json!([]));
+        wait_until(&store, &run_id, done);
+        assert_eq!(store.run(&run_id).unwrap().outcome, RunOutcome::Succeeded);
+        assert_eq!(installs(), "x\n");
+
+        // lockfileと設定ファイルが変わったら、確認なしでは何も実行しない。
+        std::fs::write(repo.join("pnpm-lock.yaml"), "v2").unwrap();
+        std::fs::write(&config, format!("{workflow}# edited\n")).unwrap();
+        let error = resume(false).unwrap_err();
+        assert_eq!(error.code, "needs-confirmation");
+        assert!(
+            error.message.contains("pnpm-lock.yaml changed"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("keeps the recorded configuration"),
+            "{}",
+            error.message
+        );
+        assert_eq!(installs(), "x\n");
+
+        // 確認後は成功済みのタスクも実行し直し、次の再開では新しい記録と比べる。
+        let result = resume(true).unwrap();
+        assert_eq!(result["changes"].as_array().unwrap().len(), 2);
+        wait_until(&store, &run_id, done);
+        assert_eq!(store.run(&run_id).unwrap().outcome, RunOutcome::Succeeded);
+        assert_eq!(installs(), "x\nx\n");
+        let error = resume(false).unwrap_err();
+        assert!(
+            !error.message.contains("pnpm-lock.yaml"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

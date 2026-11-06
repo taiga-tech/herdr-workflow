@@ -35,7 +35,7 @@ SQLiteを状態ストアの案とし、Coordinatorの単一書き込み経路で
 
 TaskRunnerはDBへ直接書かず、Attempt用の結果ファイルを一時ファイルからの置換で確定する。Coordinatorが取り込む。TaskRunnerはAttemptごとの別プロセス(`herdr-workflow runner`、独立したプロセスグループ)であり、Coordinatorが異常終了しても子プロセスを止めずに結果ファイルを確定する([ADR-0002](../decisions/0002-coordinator-runner.md))。再起動したCoordinatorは未完了のRunを照合し、記録と一致するプロセスが稼働中なら再起動も停止もせず`unknown`とし、結果ファイルがあればその結果を、どちらもなければ`unknown`を記録する。Runは`phase=stopped, outcome=unknown`となる。その後もCoordinatorは1秒ごとに、`unknown`のTaskの結果ファイルを確かめ、確定していれば取り込んでTaskとRunの結果を更新する。結果取り込みを繰り返しても同じAttemptの結果を重複適用しない。
 
-スキーマ版を`PRAGMA user_version`で持ち、更新前に`state.v<旧版>.bak`へバックアップを作成する。現在の版は5である(版2で`approvals`と`acceptances`、版3で`runs.owned_workspace`、版4で`runs.herdr_state`、版5で`approvals.side_effects`を追加)。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
+スキーマ版を`PRAGMA user_version`で持ち、更新前に`state.v<旧版>.bak`へバックアップを作成する。現在の版は5である(版2で`approvals`と`acceptances`、版3で`runs.owned_workspace`、版4で`runs.herdr_state`、版5で`approvals.side_effects`、版6で`runs.fingerprint`を追加)。旧版が読めないDBへ戻す場合はエラーを返し、未知の列や状態を黙って捨てない。
 
 <a id="state-directory"></a>
 

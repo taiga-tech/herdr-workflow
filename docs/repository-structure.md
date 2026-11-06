@@ -73,7 +73,8 @@ herdr-workflow/
 │   │   ├── engine.rs               スケジューラ(engine/tests.rsは実プロセス試験)
 │   │   ├── store.rs                SQLiteの状態ストア
 │   │   ├── git.rs                  Git CLIによるcheckoutの照合
-│   │   └── files.rs                files.copyの検査・実行・復旧
+│   │   ├── files.rs                files.copyの検査・実行・復旧
+│   │   └── fingerprint.rs          再開前に比べるcheckoutの記録
 │   └── state/
 │       └── models.rs               TaskState、AttemptResult等
 ├── tests/
