@@ -1,5 +1,3 @@
-# GitHub Actionsのworkflow雛形。このリポジトリのGitHub Appにはworkflows権限がないため、
-# `.github/workflows/ci.yml`へ移す作業は利用者が行う(docs/guides/development.md#ci)。
 name: ci
 
 on:
