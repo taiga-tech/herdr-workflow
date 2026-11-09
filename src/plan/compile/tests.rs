@@ -88,7 +88,8 @@ fn agent_task_cannot_be_depended_on_with_succeeded() {
         TaskDef::Command {
             lifecycle: crate::config::model::TaskLifecycle::Job,
             runner: crate::config::model::RunnerKind::Supervised,
-            argv: vec!["true".to_string()],
+            argv: Some(vec!["true".to_string()]),
+            script: None,
             env: Default::default(),
             depends_on: vec![DependsOn {
                 task: TaskId::from("developer"),
@@ -98,6 +99,9 @@ fn agent_task_cannot_be_depended_on_with_succeeded() {
             wait_for: None,
             stop: None,
             on_dependency_lost: None,
+            locks: Vec::new(),
+            retry: None,
+            herdr_action: None,
         },
     );
     let err = compile(&spec).expect_err("agent dependency with succeeded should be rejected");
@@ -254,7 +258,7 @@ fn agent_task_with_multiple_agent_panes_is_rejected() {
 #[test]
 fn compile_rejects_spec_with_undefined_input_variable() {
     let mut spec = example_spec();
-    spec.worktree.branch = "${inputs.missing}".to_string();
+    spec.worktree.branch = Some("${inputs.missing}".to_string());
     let err = compile(&spec).expect_err("undefined input variable should be rejected");
     assert!(matches!(err, CompileError::Invalid(_)));
 }

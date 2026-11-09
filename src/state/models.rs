@@ -57,6 +57,8 @@ pub struct LaunchEvidence {
 pub enum AttemptOutcome {
     Pending,
     ExitCode(i32),
+    /// `timeoutSeconds`またはreadinessの期限切れで停止した。
+    TimedOut,
     UnexpectedExit,
     Signaled(String),
     LaunchFailed(String),
@@ -204,6 +206,7 @@ mod tests {
         // Pending以外は終端結果とし、同世代の別結果やPendingで上書きしない。
         for outcome in [
             AttemptOutcome::ExitCode(1),
+            AttemptOutcome::TimedOut,
             AttemptOutcome::UnexpectedExit,
             AttemptOutcome::Signaled("SIGTERM".to_string()),
             AttemptOutcome::LaunchFailed("command not found".to_string()),

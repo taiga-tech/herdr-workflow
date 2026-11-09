@@ -35,7 +35,7 @@ updated: '2026-09-17'
 
 readinessは別フィールドで`not-applicable / pending / ready / unready`を持つ。serviceは準備が整っても`running`のままであり、`succeeded`へ変えない。
 
-Agentの`idle / working / blocked / done / unknown`等の観測値は別フィールドに保存する。Agentの表示上の状態とTaskの終了結果を統合しない。
+Agentの`idle / working / blocked / done / unknown`等の観測値は別フィールドに保存する。Agentの表示上の状態とTaskの終了結果を統合しない。AgentタスクはHerdrの`agent.start`が成功した時点で`running`かつ`ready`とし、その後はHerdrから照会した観測値だけを更新する。`idle`や`done`を観測しても`succeeded`にしない。Herdrへ照会できない間の観測値は`unknown`とし、Agentが終了または置き換わった場合はTaskを`stopped`にする。
 
 ### Runの状態
 

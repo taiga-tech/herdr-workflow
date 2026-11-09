@@ -3,7 +3,7 @@ id: ADR-0005
 title: 'ADR-0005：設定定義と生成スキーマの管理'
 status: proposed
 documentVersion: '0.2'
-updated: '2026-09-14'
+updated: '2026-11-05'
 ---
 
 # ADR-0005：設定定義と生成スキーマの管理
@@ -41,6 +41,10 @@ Rust型と生成スキーマが存在しない状態では、文書検査の合�
 未知キー・重複キー検出、値置換、DAG(循環依存・依存条件)、gridの検証をすべて実装した後、`schemars`(Cargo.tomlの依存)で`WorkflowSpec`からJSON Schemaを生成する`herdr-workflow schema`コマンドを実装した(`src/cli.rs`)。生成物は`schema/workflow.schema.json`としてリポジトリに追跡する。`jsonschema`(dev依存)で`examples/workflow.yaml`が生成スキーマに対して妥当であることと、JSON Schemaが構造検証のみを担いDAGの意味検証を代替しないことを`tests/schema_contract.rs`で確認した。
 
 採用条件のうち「Q11の未定義キーを決める」は本実装と無関係に未解決のまま残っているため、この文書の状態は引き続き`proposed`とする。
+
+## Q11の入力形式の決定
+
+Q11の未定義キーの入力形式を[設定リファレンス](../reference/configuration.md#q11-keys)で決めた。これで採用条件はすべて文書上満たす。決めたキーは設定型と意味検証へ反映したが、生成スキーマの再生成は未実施である。採用は利用者の判断として別に記録し、それまでは`proposed`とする。
 
 ## 関連文書
 

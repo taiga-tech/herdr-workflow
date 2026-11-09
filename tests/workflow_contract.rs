@@ -83,6 +83,28 @@ fn binary_reads_plugin_config_from_environment() {
 }
 
 #[test]
+fn workspace_pane_total_is_limited_before_layout() {
+    let spec = load::load_file(example_path()).expect("examples/workflow.yaml should parse");
+    let total: usize = spec.workspace.tabs.iter().map(|tab| tab.panes.len()).sum();
+    assert!(total > 1);
+    let plugin = herdr_workflow::config::plugin::load_str(&format!(
+        "version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: {}\n",
+        total - 1
+    ))
+    .unwrap();
+    let error = compile::compile_with_plugin_config(&spec, &plugin).unwrap_err();
+    assert!(
+        error.to_string().contains("maxPanesPerWorkspace"),
+        "{error}"
+    );
+    let plugin = herdr_workflow::config::plugin::load_str(&format!(
+        "version: 1\nlimits:\n  layout:\n    maxPanesPerWorkspace: {total}\n"
+    ))
+    .unwrap();
+    compile::compile_with_plugin_config(&spec, &plugin).expect("limit equal to the total passes");
+}
+
+#[test]
 fn unknown_top_level_key_is_rejected() {
     let base = std::fs::read_to_string(example_path()).unwrap();
     let yaml = format!("{base}\nunknownTopLevelKey: true\n");
@@ -114,7 +136,7 @@ fn duplicate_task_key_in_config_is_rejected_before_compile() {
 #[test]
 fn undefined_input_variable_in_config_is_rejected() {
     let mut spec = load::load_file(example_path()).expect("examples/workflow.yaml should parse");
-    spec.worktree.branch = "${inputs.missing}".to_string();
+    spec.worktree.branch = Some("${inputs.missing}".to_string());
     let err = compile::compile(&spec).expect_err("undefined input variable should be rejected");
     assert!(matches!(err, compile::CompileError::Invalid(_)));
 }

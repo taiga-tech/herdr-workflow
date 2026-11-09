@@ -164,6 +164,9 @@ struct PlanReport {
     resolved_inputs: substitute::ResolvedInputs,
     #[serde(rename = "resolvedValues")]
     resolved_values: BTreeMap<String, String>,
+    /// ブランチ名で選んだprofile(Q08)。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
 }
 
 /// (exit_code, stdoutへ出す文字列) を返す純粋関数。プロセスには触れない。
@@ -260,6 +263,28 @@ fn run_plan(
         .iter()
         .map(|(k, v)| (InputId(k.clone()), v.clone()))
         .collect();
+    // 一致したprofileを適用した構成で計画し直す。
+    let (spec, plan, profile) =
+        match crate::config::profile::resolve(&spec, &provided, config.parent()) {
+            (applied, Some(profile)) => {
+                match compile::compile_with_plugin_config(&applied, plugin_config) {
+                    Ok(plan) => (applied, plan, Some(profile)),
+                    Err(err) => {
+                        return (
+                            2,
+                            error_output(
+                                json,
+                                ErrorEnvelope {
+                                    stage: "compile",
+                                    message: format!("profile {profile}: {err}"),
+                                },
+                            ),
+                        );
+                    }
+                }
+            }
+            (_, None) => (spec, plan, None),
+        };
 
     let validation_error = |err: crate::config::validate::ValidateError| {
         (
@@ -291,6 +316,7 @@ fn run_plan(
         workspace: plan.workspace.clone(),
         resolved_inputs: resolved,
         resolved_values: resolved_values.0,
+        profile,
     };
 
     let output = if json {
@@ -301,9 +327,14 @@ fn run_plan(
         serde_json::to_string(&outcome).expect("serializable")
     } else {
         format!(
-            "計画は妥当です(hash={}, タスク数={})",
+            "計画は妥当です(hash={}, タスク数={}{})",
             report.hash,
-            report.tasks.len()
+            report.tasks.len(),
+            report
+                .profile
+                .as_ref()
+                .map(|profile| format!(", profile={profile}"))
+                .unwrap_or_default()
         )
     };
     (0, output)
@@ -355,7 +386,7 @@ impl std::io::Write for HashWriter {
     }
 }
 
-fn plan_hash(
+pub(crate) fn plan_hash(
     spec: &WorkflowSpec,
     plugin_config: &PluginConfig,
     resolved: &substitute::ResolvedInputs,

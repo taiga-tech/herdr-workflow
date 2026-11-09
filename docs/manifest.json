@@ -56,14 +56,14 @@
             "id": "ADR-0002",
             "path": "docs/decisions/0002-coordinator-runner.md",
             "title": "ADR-0002：CoordinatorとTaskRunnerの分離",
-            "status": "proposed",
+            "status": "accepted",
             "sourceSections": []
         },
         {
             "id": "ADR-0003",
             "path": "docs/decisions/0003-dependency-readiness.md",
             "title": "ADR-0003：依存条件とreadinessの分離",
-            "status": "proposed",
+            "status": "accepted",
             "sourceSections": []
         },
         {
@@ -84,6 +84,20 @@
             "id": "ADR-0006",
             "path": "docs/decisions/0006-plugin-config.md",
             "title": "ADR-0006：利用者固有のプラグイン全体設定",
+            "status": "accepted",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-0007",
+            "path": "docs/decisions/0007-state-directory-ipc.md",
+            "title": "ADR-0007：状態ディレクトリ、制御通信、プロセス識別",
+            "status": "accepted",
+            "sourceSections": []
+        },
+        {
+            "id": "ADR-0008",
+            "path": "docs/decisions/0008-pty-runner.md",
+            "title": "ADR-0008：対話コマンドの擬似端末をTaskRunnerが持つ",
             "status": "accepted",
             "sourceSections": []
         },
