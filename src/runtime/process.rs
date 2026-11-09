@@ -101,6 +101,8 @@ fn read_start_time(pid: u32) -> io::Result<Option<u64>> {
 }
 
 /// comm欄は空白や括弧を含みうるため、最後の`)`以降を分割する。
+/// Linux以外では使わないが、解析の試験は全OSで行う。
+#[cfg(any(target_os = "linux", test))]
 fn parse_start_time(stat: &str) -> Option<u64> {
     let rest = &stat[stat.rfind(')')? + 1..];
     // rest[0]がstate(3番目)なので、22番目は19番目の要素。
