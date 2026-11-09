@@ -16,7 +16,7 @@ updated: '2026-09-16'
 
 ## 現在の状態
 
-このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、workflow設定例とプラグイン全体設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、プラグイン全体設定の読み込み(`config/plugin.rs`)、秘密値定義の読み込みと参照確認(`config/secrets.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、非対話実行の`src/runtime/`、Coordinatorと制御通信(`src/coordinator.rs`)、実行系のCLI(`src/commands.rs`)、承認とイベント受付(`src/approval.rs`)、Herdr Socket APIの連携(`src/herdr.rs`)、CI(`.github/workflows/ci.yml`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`・`tests/cli_runtime.rs`)が存在する。
+このリポジトリでは、製品コード、テスト、仕様、設定例、開発用スキルを同じ履歴で管理する。現在は文書、workflow設定例とプラグイン全体設定例、文書検査スクリプト、`mise.toml`、開発用スキルに加え、`Cargo.toml`・`Cargo.lock`・`src/main.rs`・`src/lib.rs`、`WorkflowSpec`・`ExecutionPlan`・`TaskState`・`AttemptResult`の型定義(`src/config/`・`src/plan/`・`src/state/`)、値置換と意味検証(`config/substitute.rs`・`config/validate.rs`)、プラグイン全体設定の読み込み(`config/plugin.rs`)、秘密値定義の読み込みと参照確認(`config/secrets.rs`)、gridから二分割木への変換(`plan/layout.rs`)、`validate`/`plan`/`schema`サブコマンド(`src/cli.rs`)、`validate`アクションを登録した`herdr-plugin.toml`、`WorkflowSpec`から生成したJSON Schema(`schema/workflow.schema.json`)、非対話実行の`src/runtime/`、Coordinatorと制御通信(`src/coordinator.rs`)、実行系のCLI(`src/commands.rs`)、承認とイベント受付(`src/approval.rs`)、Herdr Socket APIの連携(`src/herdr.rs`)、CI(`.github/workflows/rust.yml`・`.github/workflows/docs.yml`)、および契約試験(`tests/workflow_contract.rs`・`tests/schema_contract.rs`・`tests/cli_runtime.rs`)が存在する。
 
 実装予定のファイルが一覧にあることを、ファイルや機能が存在する根拠にしない。
 
@@ -35,7 +35,9 @@ herdr-workflow/
 ├── Cargo.toml                      package定義と依存関係
 ├── Cargo.lock                      解決済み依存版の固定
 ├── herdr-plugin.toml               action・worktreeイベント・`up`の端末画面を登録するmanifest
-├── .github/workflows/ci.yml        GitHub ActionsのCI(Rust検査と文書検査)
+├── .github/workflows/
+│   ├── rust.yml                    Rustのfmt・clippy・試験を行うCI
+│   └── docs.yml                    文書検査と整形確認を行うCI
 ├── schema/
 │   └── workflow.schema.json        WorkflowSpecから生成したJSON Schema
 ├── src/

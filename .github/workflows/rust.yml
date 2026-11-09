@@ -1,4 +1,4 @@
-name: ci
+name: Rust
 
 on:
   push:
@@ -9,11 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   rust:
+    name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -27,12 +28,3 @@ jobs:
       - run: mise run rust:fmt
       - run: mise run rust:clippy
       - run: mise run rust:test
-
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
-      - run: mise run docs:test
-      - run: mise run docs:audit
-      - run: prettier --check "**/*.{md,json,yaml}"

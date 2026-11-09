@@ -87,7 +87,7 @@ CIでは文書検査と製品テストを別の結果として表示する。CI�
 
 ### CI
 
-GitHub Actionsのworkflowを[.github/workflows/ci.yml](../../.github/workflows/ci.yml)に置く。workflowはUbuntuとmacOSで`mise run rust:fmt`・`rust:clippy`・`rust:test`を、Ubuntuで文書検査とprettierを実行する。macOSのjobは、この開発環境で検査できないクレート全体のdarwinビルドとプロセス識別の試験を補う。
+GitHub Actionsのworkflowを`.github/workflows/`に置く。[rust.yml](../../.github/workflows/rust.yml)はUbuntuとmacOSで`mise run rust:fmt`・`rust:clippy`・`rust:test`を、[docs.yml](../../.github/workflows/docs.yml)はUbuntuで文書検査とprettierを実行する。macOSのjobは、この開発環境で検査できないクレート全体のdarwinビルドとプロセス識別の試験を補う。
 
 ## 関連文書
 
