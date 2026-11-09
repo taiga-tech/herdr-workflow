@@ -52,10 +52,12 @@ impl Env {
     fn cli_with(&self, args: &[&str], envs: &[(&str, &str)]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_herdr-workflow"))
             .args(args)
+            // Herdrのペイン内で試験を実行しても、実機のHerdrへ接続しないようにする。
+            .env_remove("HERDR_SOCKET_PATH")
+            .env_remove("HERDR_PLUGIN_CONFIG_DIR")
             .envs(envs.iter().copied())
             .env("HERDR_WORKFLOW_STATE_DIR", &self.state)
             .env("HERDR_WORKFLOW_BIN", env!("CARGO_BIN_EXE_herdr-workflow"))
-            .env_remove("HERDR_PLUGIN_CONFIG_DIR")
             .current_dir(self.root.join("work"))
             .output()
             .unwrap()
